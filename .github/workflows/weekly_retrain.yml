@@ -33,10 +33,14 @@ jobs:
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
       - name: Trigger API reload (optional)
-        if: ${{ secrets.API_RELOAD_URL != '' }}
         run: |
-          curl -s -X POST "${{ secrets.API_RELOAD_URL }}/model/reload" \
-            -H "Content-Type: application/json" || echo "Reload skipped (API not reachable)"
+          if [ -n "$API_RELOAD_URL" ]; then
+            curl -s -X POST "${API_RELOAD_URL}/model/reload" || echo "Reload skipped (API not reachable)"
+          else
+            echo "API_RELOAD_URL not set, skipping reload"
+          fi
+        env:
+          API_RELOAD_URL: ${{ secrets.API_RELOAD_URL }}
         continue-on-error: true
 
       - name: Upload predictions as artifact
@@ -44,4 +48,5 @@ jobs:
         with:
           name: predictions-${{ github.run_number }}
           path: data/projections/
+          if-no-files-found: ignore
           retention-days: 30
