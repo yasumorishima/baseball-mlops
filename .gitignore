@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data & Models (too large for git)
+data/*.csv
+data/*.parquet
+models/*.pkl
+models/*.joblib
+models/*.lgb
+
+# W&B
+wandb/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
