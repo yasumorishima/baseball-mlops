@@ -9,11 +9,10 @@ dist/
 build/
 
 # Data & Models (too large for git)
-data/*.csv
-data/*.parquet
-models/*.pkl
-models/*.joblib
-models/*.lgb
+data/raw/
+data/projections/
+models/
+.pybaseball/
 
 # W&B
 wandb/

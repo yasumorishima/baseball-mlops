@@ -1,0 +1,47 @@
+name: Weekly Retrain
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"   # 毎週月曜 UTC 02:00 (JST 11:00)
+  workflow_dispatch:        # 手動実行も可
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch Statcast data
+        run: python src/fetch_statcast.py
+        env:
+          PYBASEBALL_CACHE: "1"
+
+      - name: Train models & log to W&B
+        run: python src/train.py
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+
+      - name: Trigger API reload (optional)
+        if: ${{ secrets.API_RELOAD_URL != '' }}
+        run: |
+          curl -s -X POST "${{ secrets.API_RELOAD_URL }}/model/reload" \
+            -H "Content-Type: application/json" || echo "Reload skipped (API not reachable)"
+        continue-on-error: true
+
+      - name: Upload predictions as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions-${{ github.run_number }}
+          path: data/projections/
+          retention-days: 30

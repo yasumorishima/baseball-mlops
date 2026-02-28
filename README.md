@@ -1,73 +1,95 @@
-# npb-mlops
+# baseball-mlops
 
-**NPB player/team performance prediction with MLOps pipeline**
+**MLB Statcast × MLOps — Weekly auto-retrained player performance prediction**
 
-MLB・NPBの過去データから選手OPSとチーム勝率を予測し、シーズン中も自動で再学習・更新するMLOpsパイプライン。
+MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
+Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで継続運用する。
 
-[Marcel法による統計予測（npb-prediction）](https://github.com/yasumorishima/npb-prediction) とは異なるアプローチで、機械学習モデルをCI/CDで継続運用する。
+[Marcel 法による統計予測（npb-prediction）](https://github.com/yasumorishima/npb-prediction) との役割分担:
+- **npb-prediction** — NPB データ経験・Marcel 法の実証
+- **baseball-mlops** — MLOps 技術力・Statcast 活用・Hawk-Eye 移植可能性
 
 ---
 
 ## 特徴
 
 | 項目 | 内容 |
-|------|------|
-| 予測ターゲット | 選手OPS（打者）+ チーム勝率 |
-| モデル | LightGBM（ローリングウィンドウ学習） |
-| 自動再学習 | GitHub Actions cron（週次） |
-| モデル管理 | Weights & Biases（バージョン履歴・学習ログ） |
-| API | FastAPI（`/predict/player` / `/predict/team`） |
-| ダッシュボード | Streamlit（Marcel予測 vs ML予測 vs 実績の3列比較） |
-| データソース | baseball-data.com / npb.jp |
+|---|---|
+| 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
+| モデル | LightGBM（5-fold CV） |
+| ベースライン | MLB Marcel 法（加重平均 + 平均回帰 + 年齢調整） |
+| データ | MLB Statcast via pybaseball（EV / Barrel% / xwOBA / sprint speed 等） |
+| 自動再学習 | GitHub Actions cron（毎週月曜）|
+| モデル管理 | W&B Model Registry（production タグ）|
+| API | FastAPI — 6 時間ごとに W&B から最新モデルを自動ロード |
+| ダッシュボード | Streamlit — Marcel vs ML vs 実績 3 列比較 |
 
 ---
 
 ## アーキテクチャ
 
 ```
-[GitHub Actions cron 毎週月曜]
-  ↓ データ取得（baseball-data.com）
-  ↓ 特徴量生成
-  ↓ LightGBM 再学習（2015〜今季途中）
-  ↓ W&B にモデルバージョン・メトリクス記録
-  ↓ モデルファイル更新（旧 vs 新の性能比較）
-  ↓ FastAPI 経由で推論提供
-  ↓ Streamlit 自動反映
+[GitHub Actions cron 毎週月曜 JST 11:00]
+  ↓ fetch_statcast.py  （pybaseball → FanGraphs + Statcast CSV）
+  ↓ train.py           （LightGBM 5-fold CV 再学習）
+  ↓ W&B Artifact 保存  （MAE / 特徴量重要度 / モデルファイル）
+  ↓ production タグ更新 （最良 MAE のモデルに自動付与）
 
-[Streamlit ダッシュボード]
-  Marcel予測 | ML予測 | 実績（途中） | 差分
+[FastAPI / Docker port 8002]
+  起動時 + 6 時間ごとに W&B から production モデルを自動ロード
+  POST /model/reload で即時更新も可能
+
+[Streamlit Dashboard]
+  選手名   Marcel wOBA  |  ML wOBA  |  実績（開幕後）
+  散布図: Marcel vs ML 乖離ハイライト
 ```
 
 ---
 
-## ローリングウィンドウ学習
+## セットアップ
 
-シーズン終了を待たずに再学習できる設計：
+### 1. GitHub Secrets 登録
 
-```
-Training: 2015〜2024（完全シーズン）+ 2025〜今季途中
-                                        ↑ 週次でここが増える
-Validation: 直近1シーズン（walk-forward CV）
-```
+| Secret | 内容 |
+|---|---|
+| `WANDB_API_KEY` | W&B API キー |
+| `WANDB_ENTITY` | W&B ユーザー名 |
+| `API_RELOAD_URL` | FastAPI の公開 URL（任意） |
 
----
-
-## ローカル実行
+### 2. ローカル / Docker
 
 ```bash
+# ローカル
 pip install -r requirements.txt
-python src/train.py        # モデル学習
-uvicorn api.main:app --reload --port 8002
+python src/fetch_statcast.py   # データ取得（GitHub Actions で自動実行）
+WANDB_API_KEY=xxx python src/train.py
+uvicorn api.main:app --port 8002
 streamlit run streamlit/app.py
+
+# Docker
+docker-compose up -d
 ```
 
 ---
 
-## データクレジット
+## API エンドポイント
 
-- [baseball-data.com](https://baseball-data.com)
-- [npb.jp](https://npb.jp)
+| Endpoint | 説明 |
+|---|---|
+| `GET /predict/hitter/{name}` | 打者 翌年 wOBA（Marcel + ML） |
+| `GET /predict/pitcher/{name}` | 投手 翌年 xFIP（Marcel + ML） |
+| `GET /rankings/hitters` | wOBA 予測ランキング |
+| `GET /rankings/pitchers` | xFIP 予測ランキング（低い順） |
+| `GET /model/info` | 現在のモデルバージョン・更新日時 |
+| `POST /model/reload` | W&B から最新モデルを手動リロード |
 
 ---
 
-*Built with Claude Code / Powered by LightGBM + W&B + FastAPI + Streamlit*
+## NPB Hawk-Eye への移植
+
+Statcast = Hawk-Eye と同じトラッキングデータ形式。
+NPB Hawk-Eye データ公開後、`fetch_statcast.py` のデータソースを差し替えるだけで移植可能。
+
+---
+
+*Built with Claude Code / LightGBM + W&B + FastAPI + Streamlit + GitHub Actions*
