@@ -20,6 +20,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+    [data-testid="stMetric"] { padding: 0.3rem 0.4rem; }
+    [data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
+    [data-testid="stHorizontalBlock"] { gap: 0.3rem !important; }
+    .stDataFrame td, .stDataFrame th { font-size: 0.8rem !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 API_URL = os.environ.get("API_URL", "http://localhost:8002")
 # predictions/ を優先（git管理・Streamlit Cloud用）、なければ data/projections/
 _BASE = Path(__file__).parent.parent
@@ -97,7 +109,7 @@ def page_batters():
         yaxis_title="ML 予測 wOBA",
         height=500,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
 
 def page_pitchers():
@@ -140,7 +152,7 @@ def page_pitchers():
         yaxis_title="ML 予測 xFIP",
         height=500,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
 
 def page_about():
@@ -187,9 +199,12 @@ with col3:
 
 st.divider()
 
-page = st.sidebar.radio(
-    "ページ",
+# メインエリアのナビ（サイドバーが閉じているスマホでも操作できる）
+page = st.radio(
+    "ページを選択",
     ["打者 wOBA 予測", "投手 xFIP 予測", "About"],
+    horizontal=True,
+    label_visibility="collapsed",
 )
 
 if page == "打者 wOBA 予測":
