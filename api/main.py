@@ -137,7 +137,7 @@ def predict_hitter(name: str):
         "age": row.get("Age", ""),
         "pred_year": int(row["pred_year"]),
         "ml_woba": float(row["pred_woba"]),
-        "marcel_woba": float(row["marcelwoba"]),
+        "marcel_woba": float(row["marcel_woba"]),
         "woba_last_season": float(row.get("wOBA_last", np.nan)),
         "model_version": state["bat_version"],
     }
@@ -156,7 +156,7 @@ def predict_pitcher(name: str):
         "age": row.get("Age", ""),
         "pred_year": int(row["pred_year"]),
         "ml_xfip": float(row["pred_xfip"]),
-        "marcel_xfip": float(row["marcelxfip"]),
+        "marcel_xfip": float(row["marcel_xfip"]),
         "xfip_last_season": float(row.get("xFIP_last", np.nan)),
         "model_version": state["pit_version"],
     }
@@ -165,14 +165,14 @@ def predict_pitcher(name: str):
 @app.get("/rankings/hitters", summary="wOBA 予測ランキング")
 def rankings_hitters(top: int = 20, sort_by: str = "ml_woba"):
     df = _load_pred_csv("batter_predictions.csv")
-    sort_col = "pred_woba" if sort_by == "ml_woba" else "marcelwoba"
+    sort_col = "pred_woba" if sort_by == "ml_woba" else "marcel_woba"
     df_sorted = df.sort_values(sort_col, ascending=False).head(top)
-    return df_sorted[["player", "Team", "Age", "pred_woba", "marcelwoba", "wOBA_last"]].to_dict("records")
+    return df_sorted[["player", "Team", "Age", "pred_woba", "marcel_woba", "wOBA_last"]].to_dict("records")
 
 
 @app.get("/rankings/pitchers", summary="xFIP 予測ランキング（低い順）")
 def rankings_pitchers(top: int = 20, sort_by: str = "ml_xfip"):
     df = _load_pred_csv("pitcher_predictions.csv")
-    sort_col = "pred_xfip" if sort_by == "ml_xfip" else "marcelxfip"
+    sort_col = "pred_xfip" if sort_by == "ml_xfip" else "marcel_xfip"
     df_sorted = df.sort_values(sort_col, ascending=True).head(top)
-    return df_sorted[["player", "Team", "Age", "pred_xfip", "marcelxfip", "xFIP_last"]].to_dict("records")
+    return df_sorted[["player", "Team", "Age", "pred_xfip", "marcel_xfip", "xFIP_last"]].to_dict("records")
