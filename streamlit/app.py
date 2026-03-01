@@ -166,6 +166,74 @@ def page_pitchers():
     st.plotly_chart(fig, use_container_width=True)
 
 
+def page_spring():
+    st.header("🌸 Spring Training 2026 検証")
+    st.caption("オープン戦実績 vs モデル予測の比較（develop 環境のみ）")
+
+    bat_spring_path = PRED_DIR / "spring_batting_2026.csv"
+    pit_spring_path = PRED_DIR / "spring_pitching_2026.csv"
+    bat_pred = load_predictions("batter")
+    pit_pred = load_predictions("pitcher")
+
+    tab1, tab2 = st.tabs(["打者", "投手"])
+
+    with tab1:
+        if not bat_spring_path.exists():
+            st.info("オープン戦データ取得中（毎日 JST 23:00 更新）")
+        elif bat_pred.empty:
+            st.warning("予測データがありません。")
+        else:
+            spring = pd.read_csv(bat_spring_path)
+            merged = spring.merge(
+                bat_pred[["player", "pred_woba", "marcel_woba"]],
+                on="player", how="inner"
+            )
+            if merged.empty:
+                st.info(f"予測データと一致する選手が見つかりません（オープン戦出場: {len(spring)} 人）")
+            else:
+                display = merged[["player", "Team", "PA", "wOBA", "pred_woba", "marcel_woba"]].copy()
+                display.columns = ["選手名", "チーム", "打席数", "実績wOBA", "ML予測", "Marcel予測"]
+                display["ML誤差"] = (display["実績wOBA"] - display["ML予測"]).round(3)
+                display["Marcel誤差"] = (display["実績wOBA"] - display["Marcel予測"]).round(3)
+                st.dataframe(display.sort_values("打席数", ascending=False),
+                             use_container_width=True)
+                ml_mae = display["ML誤差"].abs().mean()
+                mar_mae = display["Marcel誤差"].abs().mean()
+                c1, c2 = st.columns(2)
+                c1.metric("ML MAE (暫定)", f"{ml_mae:.4f}")
+                c2.metric("Marcel MAE (暫定)", f"{mar_mae:.4f}",
+                          delta=f"{mar_mae - ml_mae:+.4f}", delta_color="inverse")
+                st.caption(f"※ オープン戦は参考値。サンプル数: {len(display)} 選手")
+
+    with tab2:
+        if not pit_spring_path.exists():
+            st.info("オープン戦データ取得中（毎日 JST 23:00 更新）")
+        elif pit_pred.empty:
+            st.warning("予測データがありません。")
+        else:
+            spring = pd.read_csv(pit_spring_path)
+            merged = spring.merge(
+                pit_pred[["player", "pred_xfip", "marcel_xfip"]],
+                on="player", how="inner"
+            )
+            if merged.empty:
+                st.info(f"予測データと一致する選手が見つかりません（オープン戦出場: {len(spring)} 人）")
+            else:
+                display = merged[["player", "Team", "IP", "xFIP", "pred_xfip", "marcel_xfip"]].copy()
+                display.columns = ["選手名", "チーム", "投球回", "実績xFIP", "ML予測", "Marcel予測"]
+                display["ML誤差"] = (display["実績xFIP"] - display["ML予測"]).round(3)
+                display["Marcel誤差"] = (display["実績xFIP"] - display["Marcel予測"]).round(3)
+                st.dataframe(display.sort_values("投球回", ascending=False),
+                             use_container_width=True)
+                ml_mae = display["ML誤差"].abs().mean()
+                mar_mae = display["Marcel誤差"].abs().mean()
+                c1, c2 = st.columns(2)
+                c1.metric("ML MAE (暫定)", f"{ml_mae:.4f}")
+                c2.metric("Marcel MAE (暫定)", f"{mar_mae:.4f}",
+                          delta=f"{mar_mae - ml_mae:+.4f}", delta_color="inverse")
+                st.caption(f"※ オープン戦は参考値。サンプル数: {len(display)} 選手")
+
+
 def page_about():
     st.header("このプロジェクトについて")
     st.markdown("""
@@ -213,7 +281,7 @@ st.divider()
 # メインエリアのナビ（サイドバーが閉じているスマホでも操作できる）
 page = st.radio(
     "ページを選択",
-    ["打者 wOBA 予測", "投手 xFIP 予測", "About"],
+    ["打者 wOBA 予測", "投手 xFIP 予測", "🌸 Spring Training 検証", "About"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -222,5 +290,7 @@ if page == "打者 wOBA 予測":
     page_batters()
 elif page == "投手 xFIP 予測":
     page_pitchers()
+elif page == "🌸 Spring Training 検証":
+    page_spring()
 else:
     page_about()
