@@ -83,23 +83,28 @@ def page_batters():
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(3)
     st.dataframe(display, use_container_width=True, height=600)
 
-    # 散布図: Marcel vs ML
+    # 散布図: Marcel vs ML（乖離Top10のみラベル表示、他はホバーで確認）
     st.subheader("Marcel vs ML — 乖離が大きい選手をハイライト")
+    diff = (df_show["pred_woba"] - df_show["marcel_woba"]).abs()
+    top10_idx = diff.nlargest(10).index
+    labels = df_show["player"].where(df_show.index.isin(top10_idx), "")
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df_show["marcel_woba"], y=df_show["pred_woba"],
         mode="markers+text",
-        text=df_show["player"],
+        text=labels,
         textposition="top center",
+        hovertemplate="<b>%{customdata}</b><br>Marcel: %{x:.3f}<br>ML: %{y:.3f}<extra></extra>",
+        customdata=df_show["player"],
         marker=dict(
-            size=8,
-            color=(df_show["pred_woba"] - df_show["marcel_woba"]).abs(),
+            size=9,
+            color=diff,
             colorscale="RdYlGn",
             showscale=True,
             colorbar=dict(title="|ML - Marcel|"),
         ),
     ))
-    # y=x の対角線
     lo = min(df_show["marcel_woba"].min(), df_show["pred_woba"].min()) - 0.01
     hi = max(df_show["marcel_woba"].max(), df_show["pred_woba"].max()) + 0.01
     fig.add_shape(type="line", x0=lo, y0=lo, x1=hi, y1=hi,
@@ -109,7 +114,7 @@ def page_batters():
         yaxis_title="ML 予測 wOBA",
         height=500,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def page_pitchers():
@@ -128,16 +133,22 @@ def page_pitchers():
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(2)
     st.dataframe(display, use_container_width=True, height=600)
 
-    st.subheader("Marcel vs ML")
+    st.subheader("Marcel vs ML — 乖離が大きい選手をハイライト")
+    diff = (df_show["pred_xfip"] - df_show["marcel_xfip"]).abs()
+    top10_idx = diff.nlargest(10).index
+    labels = df_show["player"].where(df_show.index.isin(top10_idx), "")
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df_show["marcel_xfip"], y=df_show["pred_xfip"],
         mode="markers+text",
-        text=df_show["player"],
+        text=labels,
         textposition="top center",
+        hovertemplate="<b>%{customdata}</b><br>Marcel: %{x:.2f}<br>ML: %{y:.2f}<extra></extra>",
+        customdata=df_show["player"],
         marker=dict(
-            size=8,
-            color=(df_show["pred_xfip"] - df_show["marcel_xfip"]).abs(),
+            size=9,
+            color=diff,
             colorscale="RdYlGn_r",
             showscale=True,
             colorbar=dict(title="|ML - Marcel|"),
@@ -152,7 +163,7 @@ def page_pitchers():
         yaxis_title="ML 予測 xFIP",
         height=500,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def page_about():
