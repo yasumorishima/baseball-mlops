@@ -78,7 +78,7 @@ def fetch_sprint_speed(start: int = START_SEASON, end: int = END_SEASON) -> pd.D
     print(f"Statcast sprint speed {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_sprint_speed(year, minOF=10)
+        df = pb.statcast_sprint_speed(year)
         df["Season"] = year
         frames.append(df)
         time.sleep(1)
