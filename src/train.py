@@ -227,7 +227,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
 
 
 def save_to_wandb(model, mae: float, target: str, feature_names: list, config: dict):
-    """W&B にモデル・メトリクス・特徴量重要度を記録"""
+    """W&B にモデル・メトリクス・特徴量重要度を記録し、MAE が改善したら production タグを昇格"""
     wandb.login(key=os.environ.get("WANDB_API_KEY"))
     entity = os.environ.get("WANDB_ENTITY") or None
     run = wandb.init(project="baseball-mlops", entity=entity, job_type="train",
@@ -242,15 +242,40 @@ def save_to_wandb(model, mae: float, target: str, feature_names: list, config: d
     }).sort_values("importance", ascending=False)
     wandb.log({f"feature_importance_{target}": wandb.Table(dataframe=importance.head(20))})
 
-    # モデルを Artifact として保存
+    # モデルを Artifact として保存（MAE をメタデータに記録）
     artifact = wandb.Artifact(f"{target}-model", type="model",
-                               description=f"LightGBM {target} predictor, MAE={mae:.4f}")
+                               description=f"LightGBM {target} predictor, MAE={mae:.4f}",
+                               metadata={"mae": mae})
     model_path = MODELS_DIR / f"{target}_model.pkl"
     joblib.dump(model, model_path)
     artifact.add_file(str(model_path))
     run.log_artifact(artifact, aliases=["latest"])
 
     run.finish()
+
+    # production タグ: 既存 production より MAE が小さければ自動昇格
+    api = wandb.Api()
+    prefix = f"{entity}/" if entity else ""
+    art_path = f"{prefix}baseball-mlops/{target}-model:latest"
+    try:
+        prod = api.artifact(f"{prefix}baseball-mlops/{target}-model:production")
+        prod_mae = prod.metadata.get("mae", float("inf"))
+        if mae < prod_mae:
+            art = api.artifact(art_path)
+            if "production" not in art.aliases:
+                art.aliases.append("production")
+                art.save()
+            print(f"  → production 昇格 (MAE {mae:.4f} < {prod_mae:.4f})")
+        else:
+            print(f"  → production 据え置き (MAE {mae:.4f} >= {prod_mae:.4f})")
+    except Exception:
+        # production が未存在 → 初回は必ず昇格
+        art = api.artifact(art_path)
+        if "production" not in art.aliases:
+            art.aliases.append("production")
+            art.save()
+        print(f"  → production 初回登録 (MAE {mae:.4f})")
+
     return artifact
 
 
