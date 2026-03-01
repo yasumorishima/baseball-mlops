@@ -228,7 +228,9 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
 
 def save_to_wandb(model, mae: float, target: str, feature_names: list, config: dict):
     """W&B にモデル・メトリクス・特徴量重要度を記録"""
-    run = wandb.init(project="baseball-mlops", job_type="train",
+    wandb.login(key=os.environ.get("WANDB_API_KEY"))
+    entity = os.environ.get("WANDB_ENTITY") or None
+    run = wandb.init(project="baseball-mlops", entity=entity, job_type="train",
                      config={**config, "target": target})
 
     wandb.log({f"MAE_{target}": mae})
