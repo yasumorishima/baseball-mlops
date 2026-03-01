@@ -141,6 +141,22 @@ def fetch_pitching_expected(start: int = START_SEASON, end: int = END_SEASON) ->
 # マージ
 # ---------------------------------------------------------------------------
 
+def _sc_player_col(df: pd.DataFrame) -> pd.DataFrame:
+    """Statcast CSV の選手名カラムを統一し season カラムを生成する"""
+    # player 名の構築（"last_name, first_name" 結合型 or 別カラム型どちらにも対応）
+    if "last_name, first_name" in df.columns:
+        df["player"] = df["last_name, first_name"].str.split(", ").apply(
+            lambda x: f"{x[1]} {x[0]}" if len(x) == 2 else x[0]
+        )
+    elif "last_name" in df.columns and "first_name" in df.columns:
+        df["player"] = df["first_name"] + " " + df["last_name"]
+    # season カラム統一（year / Season → season）
+    for src in ("year", "Season"):
+        if src in df.columns and "season" not in df.columns:
+            df = df.rename(columns={src: "season"})
+    return df
+
+
 def build_batter_features() -> pd.DataFrame:
     """FanGraphs + Statcast をマージして打者特徴量テーブルを構築"""
     fg = pd.read_csv(DATA_DIR / "fg_batting.csv")
@@ -148,36 +164,25 @@ def build_batter_features() -> pd.DataFrame:
     exp = pd.read_csv(DATA_DIR / "sc_batter_expected.csv")
     spd = pd.read_csv(DATA_DIR / "sc_sprint_speed.csv")
 
-    # FanGraphs の選手IDカラム名を統一
     fg = fg.rename(columns={"playerid": "fg_id", "Name": "player", "Season": "season"})
+    ev = _sc_player_col(ev)
+    exp = _sc_player_col(exp)
+    spd = _sc_player_col(spd)
 
-    # Statcast は last_name, first_name → full_name を作る
-    for df in [ev, exp]:
-        df["player"] = df["last_name, first_name"].str.split(", ").apply(
-            lambda x: f"{x[1]} {x[0]}" if len(x) == 2 else x[0]
-        )
-        df.rename(columns={"Season": "season"}, inplace=True)
+    # pybaseball expected stats の実カラム名: est_ba / est_slg / est_woba
+    exp_cols = ["player", "season"] + [
+        c for c in ("est_ba", "est_slg", "est_woba")
+        if c in exp.columns
+    ]
+    sc = ev.merge(exp[exp_cols], on=["player", "season"], how="left")
+    if "sprint_speed" in spd.columns:
+        sc = sc.merge(spd[["player", "season", "sprint_speed"]],
+                      on=["player", "season"], how="left")
 
-    spd = spd.rename(columns={"last_name, first_name": "player_raw", "Season": "season"})
-    spd["player"] = spd["player_raw"].str.split(", ").apply(
-        lambda x: f"{x[1]} {x[0]}" if len(x) == 2 else x[0]
-    )
-
-    # Statcast 同士をマージ
-    sc = ev.merge(
-        exp[["player", "season", "xba", "xslg", "xwoba", "xwobacon"]],
-        on=["player", "season"], how="left"
-    ).merge(
-        spd[["player", "season", "sprint_speed"]],
-        on=["player", "season"], how="left"
-    )
-
-    # FanGraphs とマージ（選手名 + シーズンで結合）
     merged = fg.merge(sc, on=["player", "season"], how="left")
-
     out_path = DATA_DIR / "batter_features.csv"
     merged.to_csv(out_path, index=False)
-    print(f"Batter features: {len(merged)} rows → {out_path}")
+    print(f"Batter features: {len(merged)} rows, cols sample: {list(merged.columns[:8])}")
     return merged
 
 
@@ -188,23 +193,19 @@ def build_pitcher_features() -> pd.DataFrame:
     exp = pd.read_csv(DATA_DIR / "sc_pitcher_expected.csv")
 
     fg = fg.rename(columns={"playerid": "fg_id", "Name": "player", "Season": "season"})
+    ev = _sc_player_col(ev)
+    exp = _sc_player_col(exp)
 
-    for df in [ev, exp]:
-        df["player"] = df["last_name, first_name"].str.split(", ").apply(
-            lambda x: f"{x[1]} {x[0]}" if len(x) == 2 else x[0]
-        )
-        df.rename(columns={"Season": "season"}, inplace=True)
-
-    sc = ev.merge(
-        exp[["player", "season", "xba", "xslg", "xwoba", "xera"]],
-        on=["player", "season"], how="left"
-    )
+    exp_cols = ["player", "season"] + [
+        c for c in ("est_ba", "est_slg", "est_woba", "est_era")
+        if c in exp.columns
+    ]
+    sc = ev.merge(exp[exp_cols], on=["player", "season"], how="left")
 
     merged = fg.merge(sc, on=["player", "season"], how="left")
-
     out_path = DATA_DIR / "pitcher_features.csv"
     merged.to_csv(out_path, index=False)
-    print(f"Pitcher features: {len(merged)} rows → {out_path}")
+    print(f"Pitcher features: {len(merged)} rows, cols sample: {list(merged.columns[:8])}")
     return merged
 
 

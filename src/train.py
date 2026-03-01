@@ -99,19 +99,29 @@ def marcel_xfip(df: pd.DataFrame, player: str, year: int) -> float | None:
 # 特徴量構築
 # ---------------------------------------------------------------------------
 
+# FanGraphs カラム名 (大文字) + Statcast カラム名 (小文字 / snake_case)
 BATTER_FEATURES = [
-    "wOBA", "xwoba", "xba", "xslg",
-    "K%", "BB%", "ISO", "BABIP", "OBP", "SLG",
-    "exit_velocity_avg", "launch_angle_avg", "barrel_batted_rate",
-    "hard_hit_percent", "sweet_spot_percent", "sprint_speed",
+    # FanGraphs
+    "wOBA", "xwOBA", "K%", "BB%", "ISO", "BABIP", "OBP", "SLG",
+    # Statcast expected stats
+    "est_ba", "est_slg", "est_woba",
+    # Statcast exit velo / barrels
+    "avg_hit_speed", "avg_hit_angle", "brl_percent", "ev95percent",
+    "anglesweetspotpercent",
+    # Statcast sprint speed
+    "sprint_speed",
+    # 基本情報
     "Age", "PA",
 ]
 
 PITCHER_FEATURES = [
-    "xFIP", "FIP", "ERA", "xera",
-    "K%", "BB%", "HR/9", "WHIP", "BABIP", "LOB%",
-    "exit_velocity_avg", "launch_angle_avg", "barrel_batted_rate",
-    "hard_hit_percent", "xwoba",
+    # FanGraphs
+    "xFIP", "FIP", "ERA", "K%", "BB%", "HR/9", "WHIP", "BABIP", "LOB%",
+    # Statcast expected stats
+    "est_ba", "est_slg", "est_woba", "est_era",
+    # Statcast exit velo (被打球)
+    "avg_hit_speed", "avg_hit_angle", "brl_percent", "ev95percent",
+    # 基本情報
     "Age", "IP",
 ]
 
