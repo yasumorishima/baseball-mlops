@@ -21,7 +21,10 @@ st.set_page_config(
 )
 
 API_URL = os.environ.get("API_URL", "http://localhost:8002")
-PROJ_DIR = Path(__file__).parent.parent / "data" / "projections"
+# predictions/ を優先（git管理・Streamlit Cloud用）、なければ data/projections/
+_BASE = Path(__file__).parent.parent
+PRED_DIR = _BASE / "predictions"
+PROJ_DIR = _BASE / "data" / "projections"
 
 
 # ---------------------------------------------------------------------------
@@ -31,9 +34,10 @@ PROJ_DIR = Path(__file__).parent.parent / "data" / "projections"
 @st.cache_data(ttl=3600)
 def load_predictions(kind: str) -> pd.DataFrame:
     fname = "batter_predictions.csv" if kind == "batter" else "pitcher_predictions.csv"
-    path = PROJ_DIR / fname
-    if path.exists():
-        return pd.read_csv(path)
+    for d in [PRED_DIR, PROJ_DIR]:
+        path = d / fname
+        if path.exists():
+            return pd.read_csv(path)
     return pd.DataFrame()
 
 
@@ -58,11 +62,11 @@ def page_batters():
 
     # ソート
     sort_col = st.radio("並び替え", ["ML予測 (pred_woba)", "Marcel予測"], horizontal=True)
-    col = "pred_woba" if "ML" in sort_col else "marcelwoba"
+    col = "pred_woba" if "ML" in sort_col else "marcel_woba"
     df_show = df.sort_values(col, ascending=False).head(50).reset_index(drop=True)
 
     # 3 列比較テーブル
-    display = df_show[["player", "Team", "Age", "wOBA_last", "marcelwoba", "pred_woba"]].copy()
+    display = df_show[["player", "Team", "Age", "wOBA_last", "marcel_woba", "pred_woba"]].copy()
     display.columns = ["選手名", "チーム", "年齢", "昨季wOBA", "Marcel予測", "ML予測"]
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(3)
     st.dataframe(display, use_container_width=True, height=600)
@@ -71,21 +75,21 @@ def page_batters():
     st.subheader("Marcel vs ML — 乖離が大きい選手をハイライト")
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df_show["marcelwoba"], y=df_show["pred_woba"],
+        x=df_show["marcel_woba"], y=df_show["pred_woba"],
         mode="markers+text",
         text=df_show["player"],
         textposition="top center",
         marker=dict(
             size=8,
-            color=(df_show["pred_woba"] - df_show["marcelwoba"]).abs(),
+            color=(df_show["pred_woba"] - df_show["marcel_woba"]).abs(),
             colorscale="RdYlGn",
             showscale=True,
             colorbar=dict(title="|ML - Marcel|"),
         ),
     ))
     # y=x の対角線
-    lo = min(df_show["marcelwoba"].min(), df_show["pred_woba"].min()) - 0.01
-    hi = max(df_show["marcelwoba"].max(), df_show["pred_woba"].max()) + 0.01
+    lo = min(df_show["marcel_woba"].min(), df_show["pred_woba"].min()) - 0.01
+    hi = max(df_show["marcel_woba"].max(), df_show["pred_woba"].max()) + 0.01
     fig.add_shape(type="line", x0=lo, y0=lo, x1=hi, y1=hi,
                   line=dict(dash="dash", color="gray"))
     fig.update_layout(
@@ -104,10 +108,10 @@ def page_pitchers():
         return
 
     sort_col = st.radio("並び替え", ["ML予測 (pred_xfip)", "Marcel予測"], horizontal=True)
-    col = "pred_xfip" if "ML" in sort_col else "marcelxfip"
+    col = "pred_xfip" if "ML" in sort_col else "marcel_xfip"
     df_show = df.sort_values(col, ascending=True).head(50).reset_index(drop=True)
 
-    display = df_show[["player", "Team", "Age", "xFIP_last", "marcelxfip", "pred_xfip"]].copy()
+    display = df_show[["player", "Team", "Age", "xFIP_last", "marcel_xfip", "pred_xfip"]].copy()
     display.columns = ["選手名", "チーム", "年齢", "昨季xFIP", "Marcel予測", "ML予測"]
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(2)
     st.dataframe(display, use_container_width=True, height=600)
@@ -115,20 +119,20 @@ def page_pitchers():
     st.subheader("Marcel vs ML")
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df_show["marcelxfip"], y=df_show["pred_xfip"],
+        x=df_show["marcel_xfip"], y=df_show["pred_xfip"],
         mode="markers+text",
         text=df_show["player"],
         textposition="top center",
         marker=dict(
             size=8,
-            color=(df_show["pred_xfip"] - df_show["marcelxfip"]).abs(),
+            color=(df_show["pred_xfip"] - df_show["marcel_xfip"]).abs(),
             colorscale="RdYlGn_r",
             showscale=True,
             colorbar=dict(title="|ML - Marcel|"),
         ),
     ))
-    lo = min(df_show["marcelxfip"].min(), df_show["pred_xfip"].min()) - 0.1
-    hi = max(df_show["marcelxfip"].max(), df_show["pred_xfip"].max()) + 0.1
+    lo = min(df_show["marcel_xfip"].min(), df_show["pred_xfip"].min()) - 0.1
+    hi = max(df_show["marcel_xfip"].max(), df_show["pred_xfip"].max()) + 0.1
     fig.add_shape(type="line", x0=lo, y0=lo, x1=hi, y1=hi,
                   line=dict(dash="dash", color="gray"))
     fig.update_layout(

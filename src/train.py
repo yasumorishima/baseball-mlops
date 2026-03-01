@@ -22,8 +22,11 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROJ_DIR = DATA_DIR / "projections"
 MODELS_DIR = Path(__file__).parent.parent / "models"
+# Streamlit Cloud 用（git 管理対象）
+PRED_DIR = Path(__file__).parent.parent / "predictions"
 PROJ_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+PRED_DIR.mkdir(parents=True, exist_ok=True)
 
 # MLB 平均値（平均回帰の基準）
 MLB_AVG_WOBA = 0.320
@@ -333,6 +336,9 @@ def run_training():
 
     bat_preds.to_csv(PROJ_DIR / "batter_predictions.csv", index=False)
     pit_preds.to_csv(PROJ_DIR / "pitcher_predictions.csv", index=False)
+    # Streamlit Cloud 用（git 管理対象）にもコピー
+    bat_preds.to_csv(PRED_DIR / "batter_predictions.csv", index=False)
+    pit_preds.to_csv(PRED_DIR / "pitcher_predictions.csv", index=False)
     print(f"Predictions saved: {len(bat_preds)} batters, {len(pit_preds)} pitchers")
 
 
