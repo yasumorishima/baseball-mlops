@@ -124,14 +124,22 @@ def manual_reload():
             "xfip_version": state["pit_version"]}
 
 
-@app.get("/predict/hitter/{name}", summary="打者 翌年 wOBA 予測（Marcel vs ML）")
+def _float_or_none(val) -> float | None:
+    try:
+        f = float(val)
+        return None if np.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+@app.get("/predict/hitter/{name}", summary="打者 翌年 wOBA 予測（Marcel vs ML vs Bayes）")
 def predict_hitter(name: str):
     df = _load_pred_csv("batter_predictions.csv")
     match = df[df["player"].str.lower().str.contains(name.lower())]
     if match.empty:
         raise HTTPException(status_code=404, detail=f"Player '{name}' not found")
     row = match.iloc[0]
-    return {
+    result = {
         "player": row["player"],
         "team": row.get("Team", ""),
         "age": row.get("Age", ""),
@@ -141,16 +149,21 @@ def predict_hitter(name: str):
         "woba_last_season": float(row.get("wOBA_last", np.nan)),
         "model_version": state["bat_version"],
     }
+    if "bayes_woba" in df.columns:
+        result["bayes_woba"] = _float_or_none(row.get("bayes_woba"))
+        result["bayes_ci_lo80"] = _float_or_none(row.get("ci_lo80"))
+        result["bayes_ci_hi80"] = _float_or_none(row.get("ci_hi80"))
+    return result
 
 
-@app.get("/predict/pitcher/{name}", summary="投手 翌年 xFIP 予測（Marcel vs ML）")
+@app.get("/predict/pitcher/{name}", summary="投手 翌年 xFIP 予測（Marcel vs ML vs Bayes）")
 def predict_pitcher(name: str):
     df = _load_pred_csv("pitcher_predictions.csv")
     match = df[df["player"].str.lower().str.contains(name.lower())]
     if match.empty:
         raise HTTPException(status_code=404, detail=f"Player '{name}' not found")
     row = match.iloc[0]
-    return {
+    result = {
         "player": row["player"],
         "team": row.get("Team", ""),
         "age": row.get("Age", ""),
@@ -160,6 +173,11 @@ def predict_pitcher(name: str):
         "xfip_last_season": float(row.get("xFIP_last", np.nan)),
         "model_version": state["pit_version"],
     }
+    if "bayes_xfip" in df.columns:
+        result["bayes_xfip"] = _float_or_none(row.get("bayes_xfip"))
+        result["bayes_ci_lo80"] = _float_or_none(row.get("ci_lo80"))
+        result["bayes_ci_hi80"] = _float_or_none(row.get("ci_hi80"))
+    return result
 
 
 @app.get("/rankings/hitters", summary="wOBA 予測ランキング")

@@ -5,6 +5,7 @@ Marcel 予測 vs ML 予測 vs 実績 の 3 列比較
 W&B モデルバージョン・最終更新日時を表示
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -65,6 +66,16 @@ def get_model_info() -> dict:
 # ページ
 # ---------------------------------------------------------------------------
 
+def _load_bayes_coef() -> dict:
+    coef_path = _BASE / "predictions" / "bayes_coef.json"
+    if coef_path.exists():
+        try:
+            return json.loads(coef_path.read_text())
+        except Exception:
+            pass
+    return {}
+
+
 def page_batters():
     st.header("⚾ 打者 wOBA 予測（翌年）")
     df = load_predictions("batter")
@@ -72,16 +83,81 @@ def page_batters():
         st.warning("予測データがありません。train.py を実行してください。")
         return
 
+    has_bayes = "bayes_woba" in df.columns
+
     # ソート
-    sort_col = st.radio("並び替え", ["ML予測 (pred_woba)", "Marcel予測"], horizontal=True)
-    col = "pred_woba" if "ML" in sort_col else "marcel_woba"
+    sort_opts = ["ML予測 (pred_woba)", "Marcel予測"]
+    if has_bayes:
+        sort_opts.insert(1, "Bayes予測")
+    sort_col = st.radio("並び替え", sort_opts, horizontal=True)
+    if "Bayes" in sort_col:
+        col = "bayes_woba"
+    elif "ML" in sort_col:
+        col = "pred_woba"
+    else:
+        col = "marcel_woba"
     df_show = df.sort_values(col, ascending=False).head(50).reset_index(drop=True)
 
-    # 3 列比較テーブル
-    display = df_show[["player", "Team", "Age", "wOBA_last", "marcel_woba", "pred_woba"]].copy()
-    display.columns = ["選手名", "チーム", "年齢", "昨季wOBA", "Marcel予測", "ML予測"]
+    # テーブル列構成
+    base_cols = ["player", "Team", "Age", "wOBA_last", "marcel_woba", "pred_woba"]
+    base_names = ["選手名", "チーム", "年齢", "昨季wOBA", "Marcel予測", "ML予測"]
+    if has_bayes:
+        base_cols += ["bayes_woba", "ci_lo80", "ci_hi80"]
+        base_names += ["Bayes予測", "CI下限(80%)", "CI上限(80%)"]
+    display = df_show[base_cols].copy()
+    display.columns = base_names
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(3)
     st.dataframe(display, use_container_width=True, height=600)
+
+    # CI バーチャート（Bayes あり時のみ）
+    if has_bayes:
+        st.subheader("Bayes 予測 + 80% 信頼区間（上位30名）")
+        df_ci = df_show.dropna(subset=["bayes_woba", "ci_lo80", "ci_hi80"]).head(30)
+        if not df_ci.empty:
+            err_lo = (df_ci["bayes_woba"] - df_ci["ci_lo80"]).clip(lower=0)
+            err_hi = (df_ci["ci_hi80"] - df_ci["bayes_woba"]).clip(lower=0)
+            fig_ci = go.Figure()
+            fig_ci.add_trace(go.Bar(
+                x=df_ci["player"],
+                y=df_ci["bayes_woba"],
+                error_y=dict(
+                    type="data",
+                    symmetric=False,
+                    array=err_hi.tolist(),
+                    arrayminus=err_lo.tolist(),
+                ),
+                name="Bayes wOBA",
+                hovertemplate="<b>%{x}</b><br>Bayes: %{y:.3f}<extra></extra>",
+            ))
+            fig_ci.update_layout(
+                xaxis_tickangle=-45,
+                yaxis_title="予測 wOBA",
+                height=450,
+            )
+            st.plotly_chart(fig_ci, use_container_width=True)
+
+    # β係数エクスパンダー
+    coef_data = _load_bayes_coef()
+    if "batter" in coef_data:
+        with st.expander("Bayes Ridge β係数（Statcast特徴量の寄与）"):
+            coef_items = sorted(
+                coef_data["batter"].items(),
+                key=lambda x: abs(x[1]["coef"]), reverse=True
+            )
+            names = [k for k, _ in coef_items]
+            values = [v["coef"] for _, v in coef_items]
+            colors = ["#1a73e8" if v >= 0 else "#d93025" for v in values]
+            fig_coef = go.Figure(go.Bar(
+                x=values, y=names,
+                orientation="h",
+                marker_color=colors,
+                hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+            ))
+            fig_coef.update_layout(
+                xaxis_title="β係数（z-score スケール）",
+                height=max(250, len(names) * 35),
+            )
+            st.plotly_chart(fig_coef, use_container_width=True)
 
     # 散布図: Marcel vs ML（乖離Top10のみラベル表示、他はホバーで確認）
     st.subheader("Marcel vs ML — 乖離が大きい選手をハイライト")
@@ -124,14 +200,79 @@ def page_pitchers():
         st.warning("予測データがありません。train.py を実行してください。")
         return
 
-    sort_col = st.radio("並び替え", ["ML予測 (pred_xfip)", "Marcel予測"], horizontal=True)
-    col = "pred_xfip" if "ML" in sort_col else "marcel_xfip"
+    has_bayes = "bayes_xfip" in df.columns
+
+    sort_opts = ["ML予測 (pred_xfip)", "Marcel予測"]
+    if has_bayes:
+        sort_opts.insert(1, "Bayes予測")
+    sort_col = st.radio("並び替え", sort_opts, horizontal=True)
+    if "Bayes" in sort_col:
+        col = "bayes_xfip"
+    elif "ML" in sort_col:
+        col = "pred_xfip"
+    else:
+        col = "marcel_xfip"
     df_show = df.sort_values(col, ascending=True).head(50).reset_index(drop=True)
 
-    display = df_show[["player", "Team", "Age", "xFIP_last", "marcel_xfip", "pred_xfip"]].copy()
-    display.columns = ["選手名", "チーム", "年齢", "昨季xFIP", "Marcel予測", "ML予測"]
+    base_cols = ["player", "Team", "Age", "xFIP_last", "marcel_xfip", "pred_xfip"]
+    base_names = ["選手名", "チーム", "年齢", "昨季xFIP", "Marcel予測", "ML予測"]
+    if has_bayes:
+        base_cols += ["bayes_xfip", "ci_lo80", "ci_hi80"]
+        base_names += ["Bayes予測", "CI下限(80%)", "CI上限(80%)"]
+    display = df_show[base_cols].copy()
+    display.columns = base_names
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(2)
     st.dataframe(display, use_container_width=True, height=600)
+
+    # CI バーチャート（Bayes あり時のみ）
+    if has_bayes:
+        st.subheader("Bayes 予測 + 80% 信頼区間（上位30名、xFIP低い順）")
+        df_ci = df_show.dropna(subset=["bayes_xfip", "ci_lo80", "ci_hi80"]).head(30)
+        if not df_ci.empty:
+            err_lo = (df_ci["bayes_xfip"] - df_ci["ci_lo80"]).clip(lower=0)
+            err_hi = (df_ci["ci_hi80"] - df_ci["bayes_xfip"]).clip(lower=0)
+            fig_ci = go.Figure()
+            fig_ci.add_trace(go.Bar(
+                x=df_ci["player"],
+                y=df_ci["bayes_xfip"],
+                error_y=dict(
+                    type="data",
+                    symmetric=False,
+                    array=err_hi.tolist(),
+                    arrayminus=err_lo.tolist(),
+                ),
+                name="Bayes xFIP",
+                hovertemplate="<b>%{x}</b><br>Bayes: %{y:.2f}<extra></extra>",
+            ))
+            fig_ci.update_layout(
+                xaxis_tickangle=-45,
+                yaxis_title="予測 xFIP",
+                height=450,
+            )
+            st.plotly_chart(fig_ci, use_container_width=True)
+
+    # β係数エクスパンダー
+    coef_data = _load_bayes_coef()
+    if "pitcher" in coef_data:
+        with st.expander("Bayes Ridge β係数（Statcast特徴量の寄与）"):
+            coef_items = sorted(
+                coef_data["pitcher"].items(),
+                key=lambda x: abs(x[1]["coef"]), reverse=True
+            )
+            names = [k for k, _ in coef_items]
+            values = [v["coef"] for _, v in coef_items]
+            colors = ["#d93025" if v >= 0 else "#1a73e8" for v in values]  # xFIPは高いと悪い
+            fig_coef = go.Figure(go.Bar(
+                x=values, y=names,
+                orientation="h",
+                marker_color=colors,
+                hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+            ))
+            fig_coef.update_layout(
+                xaxis_title="β係数（z-score スケール）",
+                height=max(250, len(names) * 35),
+            )
+            st.plotly_chart(fig_coef, use_container_width=True)
 
     st.subheader("Marcel vs ML — 乖離が大きい選手をハイライト")
     diff = (df_show["pred_xfip"] - df_show["marcel_xfip"]).abs()

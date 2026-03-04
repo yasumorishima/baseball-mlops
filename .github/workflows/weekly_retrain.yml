@@ -36,6 +36,12 @@ jobs:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
+      - name: Train Bayes model
+        run: python src/train_bayes.py
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+
       - name: Trigger API reload (optional)
         run: |
           if [ -n "$API_RELOAD_URL" ]; then
