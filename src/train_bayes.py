@@ -75,7 +75,11 @@ _BAT_RAW = [
     # FanGraphs (新規 v3 / 全年あり)
     "SwStr%", "maxEV",
 ]
-_BAT_ENG = ["age_from_peak", "age_sq", "pa_rate", "xwoba_luck", "park_factor"]
+_BAT_ENG = [
+    "age_from_peak", "age_sq", "pa_rate", "xwoba_luck", "park_factor",
+    "team_changed",   # 移籍フラグ (team(t) != team(t-1))
+    "g_change_rate",  # G(t)/G(t-1) — 急減=怪我シグナル
+]
 BAYES_FEAT_H = _BAT_RAW + _BAT_ENG
 
 _PIT_RAW = [
@@ -89,7 +93,11 @@ _PIT_RAW = [
     # FanGraphs (新規 v3 / 2020〜 のみ → MIN_PREV_SEASON=2020 で保証)
     "Stuff+", "Location+", "Pitching+",
 ]
-_PIT_ENG = ["age_from_peak", "age_sq", "ip_rate", "park_factor"]
+_PIT_ENG = [
+    "age_from_peak", "age_sq", "ip_rate", "park_factor",
+    "team_changed",   # 移籍フラグ
+    "g_change_rate",  # G(t)/G(t-1) — 急減=怪我・疲労シグナル
+]
 BAYES_FEAT_P = _PIT_RAW + _PIT_ENG
 
 
@@ -165,8 +173,20 @@ def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
             # raw features
             raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
                          for f in raw_cols}
-            # engineered features
+            # engineered features (base)
             eng_feats = eng_fn(prev_row)
+
+            # チーム変更フラグ・G前年比（2年前データが必要）
+            prev2 = df[(df["player"] == player) & (df["season"] == year - 2)]
+            team_cur  = str(prev_row.get("Team", ""))
+            g_cur     = float(prev_row.get("G") or 1)
+            if len(prev2) > 0:
+                team_prev = str(prev2.iloc[0].get("Team", ""))
+                g_prev    = float(prev2.iloc[0].get("G") or g_cur)
+            else:
+                team_prev, g_prev = team_cur, g_cur
+            eng_feats["team_changed"]  = int(team_cur != team_prev)
+            eng_feats["g_change_rate"] = round(g_cur / max(g_prev, 1), 3)
 
             records.append({
                 "player": player, "season": year, "delta": delta,
@@ -362,6 +382,19 @@ def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: floa
         raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
                      for f in _BAT_RAW}
         eng_feats = _eng_batter(prev_row)
+
+        # チーム変更フラグ・G前年比
+        prev2     = bat_df[(bat_df["player"] == player) & (bat_df["season"] == season_last - 1)]
+        team_cur  = str(prev_row.get("Team", ""))
+        g_cur     = float(prev_row.get("G") or 1)
+        if len(prev2) > 0:
+            team_prev = str(prev2.iloc[0].get("Team", ""))
+            g_prev    = float(prev2.iloc[0].get("G") or g_cur)
+        else:
+            team_prev, g_prev = team_cur, g_cur
+        eng_feats["team_changed"]  = int(team_cur != team_prev)
+        eng_feats["g_change_rate"] = round(g_cur / max(g_prev, 1), 3)
+
         feat_vals = np.array([raw_feats.get(f, eng_feats.get(f, np.nan)) for f in BAYES_FEAT_H])
 
         delta_hat, ci_lo, ci_hi = predict_with_ci(feat_vals, pipe, sigma)
@@ -400,6 +433,19 @@ def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: flo
         raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
                      for f in _PIT_RAW}
         eng_feats = _eng_pitcher(prev_row)
+
+        # チーム変更フラグ・G前年比
+        prev2     = pit_df[(pit_df["player"] == player) & (pit_df["season"] == season_last - 1)]
+        team_cur  = str(prev_row.get("Team", ""))
+        g_cur     = float(prev_row.get("G") or 1)
+        if len(prev2) > 0:
+            team_prev = str(prev2.iloc[0].get("Team", ""))
+            g_prev    = float(prev2.iloc[0].get("G") or g_cur)
+        else:
+            team_prev, g_prev = team_cur, g_cur
+        eng_feats["team_changed"]  = int(team_cur != team_prev)
+        eng_feats["g_change_rate"] = round(g_cur / max(g_prev, 1), 3)
+
         feat_vals = np.array([raw_feats.get(f, eng_feats.get(f, np.nan)) for f in BAYES_FEAT_P])
 
         delta_hat, ci_lo, ci_hi = predict_with_ci(feat_vals, pipe, sigma)

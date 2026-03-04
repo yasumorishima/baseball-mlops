@@ -21,7 +21,7 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 START_SEASON = 2015
-END_SEASON = 2024
+END_SEASON = 2025
 
 
 # ---------------------------------------------------------------------------
