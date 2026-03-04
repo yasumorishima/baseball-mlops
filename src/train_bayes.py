@@ -4,8 +4,10 @@ Bayesian Ridge 学習 + W&B 記録
 Marcel との差分 (delta) を Statcast + FanGraphs 特徴量で Ridge 回帰し、
 Monte Carlo CI (80%) を付与する。
 
-主な改良点 (v2):
-  - 特徴量拡充: 打球角度/ハードヒット%/球場補正/年齢カーブ/出場信頼度/ラック指標
+主な改良点 (v3):
+  - データ期間を 2020以降に絞る（Stuff+ / Location+ / Pitching+ が 2020〜のみ存在）
+  - 投手: Stuff+, Location+, Pitching+, SwStr% を追加
+  - 打者: SwStr%, maxEV を追加
   - SimpleImputer: NaN行を落とさず median で補完
   - Recency weight: 直近シーズンに高い重み (decay=0.85/yr)
 
@@ -38,8 +40,11 @@ RAW_DIR  = DATA_DIR / "raw"
 PRED_DIR = Path(__file__).parent.parent / "predictions"
 PRED_DIR.mkdir(parents=True, exist_ok=True)
 
-ALPHAS       = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+ALPHAS        = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
 RECENCY_DECAY = 0.85   # 1年遡るごとに 0.85 倍
+# Stuff+ が揃う 2020 以降を prev 行の下限とする
+# → delta の学習対象は 2021-2024 (prev=2020-2023)
+MIN_PREV_SEASON = 2020
 
 # ---------------------------------------------------------------------------
 # 球場補正辞書（FanGraphs Basic Park Factor, 2022-2024 平均, 100=中立）
@@ -62,23 +67,27 @@ PARK_FACTORS: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 _BAT_RAW = [
-    # 既存
+    # Statcast (既存)
     "K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "xwOBA", "sprint_speed",
-    # 新規: Statcast
     "avg_hit_angle", "ev95percent",
-    # 新規: FanGraphs
+    # FanGraphs (既存)
     "HardHit%", "Contact%", "O-Swing%", "PA", "G",
+    # FanGraphs (新規 v3 / 全年あり)
+    "SwStr%", "maxEV",
 ]
 _BAT_ENG = ["age_from_peak", "age_sq", "pa_rate", "xwoba_luck", "park_factor"]
 BAYES_FEAT_H = _BAT_RAW + _BAT_ENG
 
 _PIT_RAW = [
-    # 既存
+    # Statcast (既存)
     "K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "est_woba",
-    # 新規: Statcast
     "avg_hit_angle", "ev95percent",
-    # 新規: FanGraphs
+    # FanGraphs (既存)
     "HardHit%", "K-BB%", "CSW%", "IP", "G",
+    # FanGraphs (新規 v3 / 全年あり)
+    "SwStr%",
+    # FanGraphs (新規 v3 / 2020〜 のみ → MIN_PREV_SEASON=2020 で保証)
+    "Stuff+", "Location+", "Pitching+",
 ]
 _PIT_ENG = ["age_from_peak", "age_sq", "ip_rate", "park_factor"]
 BAYES_FEAT_P = _PIT_RAW + _PIT_ENG
@@ -123,15 +132,21 @@ def _eng_pitcher(row: pd.Series) -> dict:
 
 def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                          marcel_fn, avg_val: float,
-                         target_col: str) -> pd.DataFrame:
+                         target_col: str,
+                         min_prev_season: int = MIN_PREV_SEASON) -> pd.DataFrame:
     """
     y = actual(t+1) - marcel_pred(t+1)
     X = t 時点の raw + engineered 特徴量
+    min_prev_season: prev 行 (season=year-1) の下限。
+                     Stuff+ が存在する 2020 以降を保証するため 2020 をデフォルトとする。
+                     → delta は year >= min_prev_season+1 (2021〜) の範囲のみ使用
     """
     seasons = sorted(df["season"].unique())
     records = []
 
     for year in seasons[1:]:
+        if year - 1 < min_prev_season:   # prev 行が min_prev_season 未満はスキップ
+            continue
         targets = df[df["season"] == year]
         for _, row in targets.iterrows():
             player = row["player"]
@@ -244,10 +259,11 @@ def run():
     run_wb = wandb.init(
         project="baseball-mlops", entity=entity, job_type="train_bayes",
         config={
-            "bayes_feat_h": BAYES_FEAT_H,
-            "bayes_feat_p": BAYES_FEAT_P,
-            "alphas_grid":  ALPHAS,
-            "recency_decay": RECENCY_DECAY,
+            "bayes_feat_h":    BAYES_FEAT_H,
+            "bayes_feat_p":    BAYES_FEAT_P,
+            "alphas_grid":     ALPHAS,
+            "recency_decay":   RECENCY_DECAY,
+            "min_prev_season": MIN_PREV_SEASON,
         }
     )
 
