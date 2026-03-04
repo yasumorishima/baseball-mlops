@@ -1,91 +1,162 @@
 """
 Bayesian Ridge 学習 + W&B 記録
 
-Marcel との差分 (delta) を Statcast 特徴量で Ridge 回帰し、
+Marcel との差分 (delta) を Statcast + FanGraphs 特徴量で Ridge 回帰し、
 Monte Carlo CI (80%) を付与する。
 
-入力:  predictions/batter_predictions.csv, pitcher_predictions.csv (train.py 出力)
-       data/raw/batter_features.csv, pitcher_features.csv
-出力:  predictions/*.csv に bayes_woba/ci_lo80/ci_hi80 列を追記
-       predictions/bayes_coef.json (β係数)
+主な改良点 (v2):
+  - 特徴量拡充: 打球角度/ハードヒット%/球場補正/年齢カーブ/出場信頼度/ラック指標
+  - SimpleImputer: NaN行を落とさず median で補完
+  - Recency weight: 直近シーズンに高い重み (decay=0.85/yr)
+
+入力:  data/raw/batter_features.csv, pitcher_features.csv
+       predictions/batter_predictions.csv, pitcher_predictions.csv (train.py 出力)
+出力:  predictions/*.csv に bayes_*/ci_lo80/ci_hi80 列を追記
+       predictions/bayes_coef.json
 """
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import wandb
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-# train.py と同じ定数・関数を参照するためインポート
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
-from train import (
-    MLB_AVG_WOBA, MLB_AVG_XFIP,
-    marcel_woba, marcel_xfip,
-)
+from train import MLB_AVG_WOBA, MLB_AVG_XFIP, marcel_woba, marcel_xfip
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RAW_DIR  = DATA_DIR / "raw"
 PRED_DIR = Path(__file__).parent.parent / "predictions"
 PRED_DIR.mkdir(parents=True, exist_ok=True)
 
-# Ridge で使う Statcast 特徴量（直前シーズン値）
-BAYES_FEAT_H = ["K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "xwOBA", "sprint_speed"]
-BAYES_FEAT_P = ["K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "est_woba"]
+ALPHAS       = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+RECENCY_DECAY = 0.85   # 1年遡るごとに 0.85 倍
 
-ALPHAS = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+# ---------------------------------------------------------------------------
+# 球場補正辞書（FanGraphs Basic Park Factor, 2022-2024 平均, 100=中立）
+# >100 = 打者有利, <100 = 投手有利
+# ---------------------------------------------------------------------------
+
+PARK_FACTORS: dict[str, int] = {
+    "COL": 118, "CIN": 111, "BOS": 108, "TEX": 107, "NYY": 106,
+    "PHI": 105, "MIL": 105, "ATL": 104, "LAA": 103, "ANA": 103,
+    "CWS": 103, "CHW": 103, "HOU": 102, "TOR": 102, "STL": 101,
+    "DET": 101, "MIN": 100, "WAS": 100, "WSH": 100, "KCR": 100,
+    "KC":  100, "PIT":  99, "CHC":  99, "CLE":  99, "BAL":  99,
+    "ARI":  98, "AZ":   98, "SEA":  97, "TBR":  97, "TB":   97,
+    "NYM":  97, "LAD":  96, "OAK":  96, "SFG":  95, "SF":   95,
+    "SDP":  94, "SD":   94, "MIA":  93, "FLA":  93,
+}
+
+# ---------------------------------------------------------------------------
+# 特徴量定義（RAW=CSVから直接読む列名, ENG=計算して追加する列名）
+# ---------------------------------------------------------------------------
+
+_BAT_RAW = [
+    # 既存
+    "K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "xwOBA", "sprint_speed",
+    # 新規: Statcast
+    "avg_hit_angle", "ev95percent",
+    # 新規: FanGraphs
+    "HardHit%", "Contact%", "O-Swing%", "PA", "G",
+]
+_BAT_ENG = ["age_from_peak", "age_sq", "pa_rate", "xwoba_luck", "park_factor"]
+BAYES_FEAT_H = _BAT_RAW + _BAT_ENG
+
+_PIT_RAW = [
+    # 既存
+    "K%", "BB%", "BABIP", "brl_percent", "avg_hit_speed", "est_woba",
+    # 新規: Statcast
+    "avg_hit_angle", "ev95percent",
+    # 新規: FanGraphs
+    "HardHit%", "K-BB%", "CSW%", "IP", "G",
+]
+_PIT_ENG = ["age_from_peak", "age_sq", "ip_rate", "park_factor"]
+BAYES_FEAT_P = _PIT_RAW + _PIT_ENG
+
+
+# ---------------------------------------------------------------------------
+# 特徴量エンジニアリングヘルパー
+# ---------------------------------------------------------------------------
+
+def _park(team: str) -> float:
+    return float(PARK_FACTORS.get(str(team).strip(), 100))
+
+
+def _eng_batter(row: pd.Series) -> dict:
+    age   = float(row.get("Age") or 28)
+    pa    = float(row.get("PA") or 0)
+    xwoba = float(row.get("est_woba") or np.nan) if pd.notna(row.get("est_woba")) else np.nan
+    woba  = float(row.get("wOBA")  or np.nan) if pd.notna(row.get("wOBA"))  else np.nan
+    return {
+        "age_from_peak": age - 27,
+        "age_sq":        (age - 27) ** 2,
+        "pa_rate":       pa / 650.0,
+        "xwoba_luck":    (xwoba - woba) if (not np.isnan(xwoba) and not np.isnan(woba)) else np.nan,
+        "park_factor":   _park(row.get("Team", "")),
+    }
+
+
+def _eng_pitcher(row: pd.Series) -> dict:
+    age = float(row.get("Age") or 28)
+    ip  = float(row.get("IP") or 0)
+    return {
+        "age_from_peak": age - 27,
+        "age_sq":        (age - 27) ** 2,
+        "ip_rate":       ip / 200.0,
+        "park_factor":   _park(row.get("Team", "")),
+    }
 
 
 # ---------------------------------------------------------------------------
 # データ構築
 # ---------------------------------------------------------------------------
 
-def build_delta_dataset(df: pd.DataFrame, feat_cols: list,
+def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                          marcel_fn, avg_val: float,
                          target_col: str) -> pd.DataFrame:
     """
-    delta = actual(t+1) - marcel_pred(t+1) を y として、
-    t 時点の Statcast 特徴量を X とするデータセットを構築。
-
-    df        : batter_features.csv or pitcher_features.csv
-    feat_cols : BAYES_FEAT_H or BAYES_FEAT_P
-    target_col: "wOBA" or "xFIP"
+    y = actual(t+1) - marcel_pred(t+1)
+    X = t 時点の raw + engineered 特徴量
     """
     seasons = sorted(df["season"].unique())
     records = []
 
-    for year in seasons[1:]:  # t+1 が存在する年から
+    for year in seasons[1:]:
         targets = df[df["season"] == year]
         for _, row in targets.iterrows():
             player = row["player"]
-            actual = row.get(target_col, np.nan)
+            actual = row.get(target_col)
             if pd.isna(actual):
                 continue
 
-            # Marcel 予測 (= t+1 の予測)
-            marcel = marcel_fn(df, player, year) or avg_val
-
-            # t 時点 (= year-1) の特徴量
             prev = df[(df["player"] == player) & (df["season"] == year - 1)]
             if len(prev) == 0:
                 continue
+            prev_row = prev.iloc[0]
 
-            feats = {}
-            for f in feat_cols:
-                feats[f] = prev.iloc[0].get(f, np.nan)
+            marcel = marcel_fn(df, player, year) or avg_val
+            delta  = float(actual) - marcel
 
-            if any(pd.isna(v) for v in feats.values()):
-                continue
+            # raw features
+            raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
+                         for f in raw_cols}
+            # engineered features
+            eng_feats = eng_fn(prev_row)
 
-            record = {"player": player, "season": year,
-                      "delta": actual - marcel, **feats}
-            records.append(record)
+            records.append({
+                "player": player, "season": year, "delta": delta,
+                **raw_feats, **eng_feats,
+            })
 
     return pd.DataFrame(records)
 
@@ -94,70 +165,71 @@ def build_delta_dataset(df: pd.DataFrame, feat_cols: list,
 # モデル
 # ---------------------------------------------------------------------------
 
+def _make_pipeline(alpha: float) -> Pipeline:
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler",  StandardScaler()),
+        ("ridge",   Ridge(alpha=alpha)),
+    ])
+
+
 def find_alpha(X: np.ndarray, y: np.ndarray, alphas: list) -> float:
     """5-fold CV MAE で最良 alpha を選択"""
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     best_alpha, best_mae = alphas[0], float("inf")
     for alpha in alphas:
-        oof = np.zeros(len(y))
-        for tr_idx, va_idx in kf.split(X):
-            m = Ridge(alpha=alpha)
-            m.fit(X[tr_idx], y[tr_idx])
-            oof[va_idx] = m.predict(X[va_idx])
+        oof = cross_val_predict(_make_pipeline(alpha), X, y, cv=kf)
         mae = mean_absolute_error(y, oof)
         if mae < best_mae:
             best_mae, best_alpha = mae, alpha
     return best_alpha
 
 
-def fit_ridge(X: np.ndarray, y: np.ndarray, alpha: float):
-    """StandardScaler + Ridge を全データで学習、残差 sigma も返す"""
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-    model = Ridge(alpha=alpha)
-    model.fit(Xs, y)
-    sigma = float(np.std(y - model.predict(Xs)))
-    return scaler, model, sigma
+def fit_pipeline(X: np.ndarray, y: np.ndarray, alpha: float,
+                 sample_weight: np.ndarray | None = None):
+    """Pipeline を全データで学習し、sigma (残差標準偏差) も返す"""
+    pipe = _make_pipeline(alpha)
+    fit_kwargs = {}
+    if sample_weight is not None:
+        fit_kwargs["ridge__sample_weight"] = sample_weight
+    pipe.fit(X, y, **fit_kwargs)
+    sigma = float(np.std(y - pipe.predict(X)))
+    return pipe, sigma
+
+
+def recency_weights(seasons: np.ndarray) -> np.ndarray:
+    """直近シーズンほど重くなるサンプルウェイト"""
+    max_s = seasons.max()
+    return np.array([RECENCY_DECAY ** (max_s - s) for s in seasons])
 
 
 # ---------------------------------------------------------------------------
 # 予測 + CI
 # ---------------------------------------------------------------------------
 
-def predict_with_ci(feat_vals: np.ndarray, scaler: StandardScaler,
-                    model: Ridge, sigma: float,
+def predict_with_ci(feat_vals: np.ndarray, pipe: Pipeline, sigma: float,
                     n_samples: int = 5000) -> tuple[float, float, float]:
-    """
-    Returns (bayes_delta, ci_lo80, ci_hi80)
-    bayes_delta = point estimate of delta
-    CI: Monte Carlo N(delta_i, sigma) × n_samples → 10th/90th percentile
-    """
-    Xs = scaler.transform(feat_vals.reshape(1, -1))
-    delta_hat = float(model.predict(Xs)[0])
-    samples = np.random.normal(delta_hat, sigma, size=n_samples)
-    ci_lo = float(np.percentile(samples, 10))
-    ci_hi = float(np.percentile(samples, 90))
-    return delta_hat, ci_lo, ci_hi
+    """(delta_hat, ci_lo80, ci_hi80)"""
+    delta_hat = float(pipe.predict(feat_vals.reshape(1, -1))[0])
+    samples   = np.random.normal(delta_hat, sigma, size=n_samples)
+    return delta_hat, float(np.percentile(samples, 10)), float(np.percentile(samples, 90))
 
 
-def save_coef(model: Ridge, scaler: StandardScaler,
-              feat_names: list, path: Path, label: str):
-    """β係数（z-score スケール）を JSON に保存"""
+def save_coef(pipe: Pipeline, feat_names: list, path: Path, label: str):
+    """β係数を JSON に保存（imputer → scaler → ridge のパラメータを取り出す）"""
+    scaler: StandardScaler = pipe.named_steps["scaler"]
+    ridge:  Ridge          = pipe.named_steps["ridge"]
     coefs = {
         label: {
-            name: {
-                "coef": round(float(c), 4),
-                "mean": round(float(scaler.mean_[i]), 4),
-                "std":  round(float(scaler.scale_[i]), 4),
-            }
-            for i, (name, c) in enumerate(zip(feat_names, model.coef_))
+            name: {"coef": round(float(c), 4),
+                   "mean": round(float(scaler.mean_[i]), 4),
+                   "std":  round(float(scaler.scale_[i]), 4)}
+            for i, (name, c) in enumerate(zip(feat_names, ridge.coef_))
         }
     }
-    if path.exists():
-        existing = json.loads(path.read_text())
-        existing.update(coefs)
-        coefs = existing
-    path.write_text(json.dumps(coefs, indent=2, ensure_ascii=False))
+    existing = json.loads(path.read_text()) if path.exists() else {}
+    existing.update(coefs)
+    path.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +237,6 @@ def save_coef(model: Ridge, scaler: StandardScaler,
 # ---------------------------------------------------------------------------
 
 def run():
-    rng = np.random.default_rng(42)
     np.random.seed(42)
 
     wandb.login(key=os.environ.get("WANDB_API_KEY"))
@@ -175,7 +246,8 @@ def run():
         config={
             "bayes_feat_h": BAYES_FEAT_H,
             "bayes_feat_p": BAYES_FEAT_P,
-            "alphas_grid": ALPHAS,
+            "alphas_grid":  ALPHAS,
+            "recency_decay": RECENCY_DECAY,
         }
     )
 
@@ -185,67 +257,61 @@ def run():
     print("=== Batter Bayes (wOBA) ===")
     bat_df = pd.read_csv(RAW_DIR / "batter_features.csv")
     delta_bat = build_delta_dataset(
-        bat_df, BAYES_FEAT_H, marcel_woba, MLB_AVG_WOBA, "wOBA"
+        bat_df, _BAT_RAW, _eng_batter, marcel_woba, MLB_AVG_WOBA, "wOBA"
     )
     print(f"  delta dataset: {len(delta_bat)} samples")
 
-    X_bat = delta_bat[BAYES_FEAT_H].values.astype(float)
+    feat_cols_bat = BAYES_FEAT_H
+    X_bat = delta_bat[feat_cols_bat].values.astype(float)
     y_bat = delta_bat["delta"].values.astype(float)
+    w_bat = recency_weights(delta_bat["season"].values)
 
-    alpha_bat = find_alpha(X_bat, y_bat, ALPHAS)
-    scaler_bat, model_bat, sigma_bat = fit_ridge(X_bat, y_bat, alpha_bat)
-
-    # CV MAE (bayes)
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    oof_bat = np.zeros(len(y_bat))
-    for tr, va in kf.split(X_bat):
-        sc = StandardScaler().fit(X_bat[tr])
-        m = Ridge(alpha=alpha_bat).fit(sc.transform(X_bat[tr]), y_bat[tr])
-        oof_bat[va] = m.predict(sc.transform(X_bat[va]))
+    alpha_bat          = find_alpha(X_bat, y_bat, ALPHAS)
+    pipe_bat, sigma_bat = fit_pipeline(X_bat, y_bat, alpha_bat, w_bat)
+    oof_bat            = cross_val_predict(_make_pipeline(alpha_bat), X_bat, y_bat,
+                                           cv=KFold(5, shuffle=True, random_state=42))
     bayes_mae_bat = float(mean_absolute_error(y_bat, oof_bat))
-    print(f"  alpha={alpha_bat}, sigma={sigma_bat:.4f}, Bayes delta MAE={bayes_mae_bat:.4f}")
-
-    save_coef(model_bat, scaler_bat, BAYES_FEAT_H, coef_path, "batter")
+    print(f"  alpha={alpha_bat}, sigma={sigma_bat:.4f}, delta MAE={bayes_mae_bat:.4f}")
+    save_coef(pipe_bat, feat_cols_bat, coef_path, "batter")
 
     # ===== 投手 xFIP =====
     print("=== Pitcher Bayes (xFIP) ===")
     pit_df = pd.read_csv(RAW_DIR / "pitcher_features.csv")
     delta_pit = build_delta_dataset(
-        pit_df, BAYES_FEAT_P, marcel_xfip, MLB_AVG_XFIP, "xFIP"
+        pit_df, _PIT_RAW, _eng_pitcher, marcel_xfip, MLB_AVG_XFIP, "xFIP"
     )
     print(f"  delta dataset: {len(delta_pit)} samples")
 
-    X_pit = delta_pit[BAYES_FEAT_P].values.astype(float)
+    feat_cols_pit = BAYES_FEAT_P
+    X_pit = delta_pit[feat_cols_pit].values.astype(float)
     y_pit = delta_pit["delta"].values.astype(float)
+    w_pit = recency_weights(delta_pit["season"].values)
 
-    alpha_pit = find_alpha(X_pit, y_pit, ALPHAS)
-    scaler_pit, model_pit, sigma_pit = fit_ridge(X_pit, y_pit, alpha_pit)
-
-    oof_pit = np.zeros(len(y_pit))
-    for tr, va in kf.split(X_pit):
-        sc = StandardScaler().fit(X_pit[tr])
-        m = Ridge(alpha=alpha_pit).fit(sc.transform(X_pit[tr]), y_pit[tr])
-        oof_pit[va] = m.predict(sc.transform(X_pit[va]))
+    alpha_pit          = find_alpha(X_pit, y_pit, ALPHAS)
+    pipe_pit, sigma_pit = fit_pipeline(X_pit, y_pit, alpha_pit, w_pit)
+    oof_pit            = cross_val_predict(_make_pipeline(alpha_pit), X_pit, y_pit,
+                                           cv=KFold(5, shuffle=True, random_state=42))
     bayes_mae_pit = float(mean_absolute_error(y_pit, oof_pit))
-    print(f"  alpha={alpha_pit}, sigma={sigma_pit:.4f}, Bayes delta MAE={bayes_mae_pit:.4f}")
-
-    save_coef(model_pit, scaler_pit, BAYES_FEAT_P, coef_path, "pitcher")
+    print(f"  alpha={alpha_pit}, sigma={sigma_pit:.4f}, delta MAE={bayes_mae_pit:.4f}")
+    save_coef(pipe_pit, feat_cols_pit, coef_path, "pitcher")
 
     # ===== W&B ログ =====
-    top5_bat = sorted(
-        zip(BAYES_FEAT_H, model_bat.coef_), key=lambda x: abs(x[1]), reverse=True
-    )[:5]
-    top5_pit = sorted(
-        zip(BAYES_FEAT_P, model_pit.coef_), key=lambda x: abs(x[1]), reverse=True
-    )[:5]
+    ridge_bat: Ridge = pipe_bat.named_steps["ridge"]
+    ridge_pit: Ridge = pipe_pit.named_steps["ridge"]
+    top5_bat = sorted(zip(feat_cols_bat, ridge_bat.coef_),
+                      key=lambda x: abs(x[1]), reverse=True)[:5]
+    top5_pit = sorted(zip(feat_cols_pit, ridge_pit.coef_),
+                      key=lambda x: abs(x[1]), reverse=True)[:5]
 
     log_dict = {
-        "alpha_batter": alpha_bat,
-        "alpha_pitcher": alpha_pit,
-        "sigma_batter": sigma_bat,
-        "sigma_pitcher": sigma_pit,
-        "bayes_batter_delta_MAE": bayes_mae_bat,
+        "alpha_batter":            alpha_bat,
+        "alpha_pitcher":           alpha_pit,
+        "sigma_batter":            sigma_bat,
+        "sigma_pitcher":           sigma_pit,
+        "bayes_batter_delta_MAE":  bayes_mae_bat,
         "bayes_pitcher_delta_MAE": bayes_mae_pit,
+        "n_samples_batter":        len(delta_bat),
+        "n_samples_pitcher":       len(delta_pit),
     }
     for feat, coef in top5_bat:
         log_dict[f"coef_bat_{feat}"] = round(coef, 4)
@@ -255,86 +321,86 @@ def run():
     run_wb.finish()
 
     # ===== predictions CSV に bayes 列を追記 =====
-    # 打者
-    bat_pred_path = PRED_DIR / "batter_predictions.csv"
-    if bat_pred_path.exists():
-        bat_pred = pd.read_csv(bat_pred_path)
-        bayes_rows = []
-        for _, row in bat_pred.iterrows():
-            player = row["player"]
-            season_last = int(row.get("season_last", bat_df["season"].max()))
-            prev = bat_df[
-                (bat_df["player"] == player) & (bat_df["season"] == season_last)
-            ]
-            if len(prev) == 0 or any(
-                pd.isna(prev.iloc[0].get(f)) for f in BAYES_FEAT_H
-            ):
-                bayes_rows.append({
-                    "bayes_woba": row.get("marcel_woba", np.nan),
-                    "ci_lo80": np.nan, "ci_hi80": np.nan,
-                })
-                continue
-            feat_vals = np.array([prev.iloc[0][f] for f in BAYES_FEAT_H], dtype=float)
-            delta_hat, ci_lo, ci_hi = predict_with_ci(
-                feat_vals, scaler_bat, model_bat, sigma_bat
-            )
-            marcel_val = row.get("marcel_woba", MLB_AVG_WOBA)
-            bayes_rows.append({
-                "bayes_woba": round(float(marcel_val) + delta_hat, 3),
-                "ci_lo80": round(float(marcel_val) + ci_lo, 3),
-                "ci_hi80": round(float(marcel_val) + ci_hi, 3),
-            })
-
-        bayes_df = pd.DataFrame(bayes_rows)
-        # 既存列を上書きしないように drop してから concat
-        for col in ["bayes_woba", "ci_lo80", "ci_hi80"]:
-            if col in bat_pred.columns:
-                bat_pred = bat_pred.drop(columns=[col])
-        bat_pred = pd.concat([bat_pred.reset_index(drop=True),
-                               bayes_df.reset_index(drop=True)], axis=1)
-        bat_pred.to_csv(bat_pred_path, index=False)
-        print(f"Batter predictions updated: {bat_pred_path}")
-
-    # 投手
-    pit_pred_path = PRED_DIR / "pitcher_predictions.csv"
-    if pit_pred_path.exists():
-        pit_pred = pd.read_csv(pit_pred_path)
-        bayes_rows = []
-        for _, row in pit_pred.iterrows():
-            player = row["player"]
-            season_last = int(row.get("season_last", pit_df["season"].max()))
-            prev = pit_df[
-                (pit_df["player"] == player) & (pit_df["season"] == season_last)
-            ]
-            if len(prev) == 0 or any(
-                pd.isna(prev.iloc[0].get(f)) for f in BAYES_FEAT_P
-            ):
-                bayes_rows.append({
-                    "bayes_xfip": row.get("marcel_xfip", np.nan),
-                    "ci_lo80": np.nan, "ci_hi80": np.nan,
-                })
-                continue
-            feat_vals = np.array([prev.iloc[0][f] for f in BAYES_FEAT_P], dtype=float)
-            delta_hat, ci_lo, ci_hi = predict_with_ci(
-                feat_vals, scaler_pit, model_pit, sigma_pit
-            )
-            marcel_val = row.get("marcel_xfip", MLB_AVG_XFIP)
-            bayes_rows.append({
-                "bayes_xfip": round(float(marcel_val) + delta_hat, 2),
-                "ci_lo80": round(float(marcel_val) + ci_lo, 2),
-                "ci_hi80": round(float(marcel_val) + ci_hi, 2),
-            })
-
-        bayes_df = pd.DataFrame(bayes_rows)
-        for col in ["bayes_xfip", "ci_lo80", "ci_hi80"]:
-            if col in pit_pred.columns:
-                pit_pred = pit_pred.drop(columns=[col])
-        pit_pred = pd.concat([pit_pred.reset_index(drop=True),
-                               bayes_df.reset_index(drop=True)], axis=1)
-        pit_pred.to_csv(pit_pred_path, index=False)
-        print(f"Pitcher predictions updated: {pit_pred_path}")
+    _update_batter_predictions(bat_df, pipe_bat, sigma_bat)
+    _update_pitcher_predictions(pit_df, pipe_pit, sigma_pit)
 
     print("=== train_bayes.py complete ===")
+
+
+def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: float):
+    pred_path = PRED_DIR / "batter_predictions.csv"
+    if not pred_path.exists():
+        return
+    bat_pred = pd.read_csv(pred_path)
+    rows = []
+    for _, row in bat_pred.iterrows():
+        player     = row["player"]
+        season_last = int(row.get("season_last", bat_df["season"].max()))
+        prev = bat_df[(bat_df["player"] == player) & (bat_df["season"] == season_last)]
+
+        if len(prev) == 0:
+            rows.append({"bayes_woba": row.get("marcel_woba"), "ci_lo80": np.nan, "ci_hi80": np.nan})
+            continue
+
+        prev_row  = prev.iloc[0]
+        raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
+                     for f in _BAT_RAW}
+        eng_feats = _eng_batter(prev_row)
+        feat_vals = np.array([raw_feats.get(f, eng_feats.get(f, np.nan)) for f in BAYES_FEAT_H])
+
+        delta_hat, ci_lo, ci_hi = predict_with_ci(feat_vals, pipe, sigma)
+        marcel_val = float(row.get("marcel_woba", MLB_AVG_WOBA))
+        rows.append({
+            "bayes_woba": round(marcel_val + delta_hat, 3),
+            "ci_lo80":    round(marcel_val + ci_lo, 3),
+            "ci_hi80":    round(marcel_val + ci_hi, 3),
+        })
+
+    bayes_df = pd.DataFrame(rows)
+    for col in ["bayes_woba", "ci_lo80", "ci_hi80"]:
+        if col in bat_pred.columns:
+            bat_pred = bat_pred.drop(columns=[col])
+    bat_pred = pd.concat([bat_pred.reset_index(drop=True), bayes_df.reset_index(drop=True)], axis=1)
+    bat_pred.to_csv(pred_path, index=False)
+    print(f"Batter predictions updated: {pred_path}")
+
+
+def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: float):
+    pred_path = PRED_DIR / "pitcher_predictions.csv"
+    if not pred_path.exists():
+        return
+    pit_pred = pd.read_csv(pred_path)
+    rows = []
+    for _, row in pit_pred.iterrows():
+        player      = row["player"]
+        season_last = int(row.get("season_last", pit_df["season"].max()))
+        prev = pit_df[(pit_df["player"] == player) & (pit_df["season"] == season_last)]
+
+        if len(prev) == 0:
+            rows.append({"bayes_xfip": row.get("marcel_xfip"), "ci_lo80": np.nan, "ci_hi80": np.nan})
+            continue
+
+        prev_row  = prev.iloc[0]
+        raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
+                     for f in _PIT_RAW}
+        eng_feats = _eng_pitcher(prev_row)
+        feat_vals = np.array([raw_feats.get(f, eng_feats.get(f, np.nan)) for f in BAYES_FEAT_P])
+
+        delta_hat, ci_lo, ci_hi = predict_with_ci(feat_vals, pipe, sigma)
+        marcel_val = float(row.get("marcel_xfip", MLB_AVG_XFIP))
+        rows.append({
+            "bayes_xfip": round(marcel_val + delta_hat, 2),
+            "ci_lo80":    round(marcel_val + ci_lo, 2),
+            "ci_hi80":    round(marcel_val + ci_hi, 2),
+        })
+
+    bayes_df = pd.DataFrame(rows)
+    for col in ["bayes_xfip", "ci_lo80", "ci_hi80"]:
+        if col in pit_pred.columns:
+            pit_pred = pit_pred.drop(columns=[col])
+    pit_pred = pd.concat([pit_pred.reset_index(drop=True), bayes_df.reset_index(drop=True)], axis=1)
+    pit_pred.to_csv(pred_path, index=False)
+    print(f"Pitcher predictions updated: {pred_path}")
 
 
 if __name__ == "__main__":
