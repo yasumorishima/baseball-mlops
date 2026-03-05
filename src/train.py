@@ -475,6 +475,11 @@ def run_training():
     pit_preds.to_csv(PRED_DIR / "pitcher_predictions.csv", index=False)
     print(f"Predictions saved: {len(bat_preds)} batters, {len(pit_preds)} pitchers")
 
+    # アンサンブル用に MAE を保存
+    metrics = {"lgb_mae_woba": round(mae_bat, 4), "lgb_mae_xfip": round(mae_pit, 4),
+               "marcel_mae_woba": round(marcel_mae_bat, 4), "marcel_mae_xfip": round(marcel_mae_pit, 4)}
+    (PRED_DIR / "model_metrics.json").write_text(json.dumps(metrics, indent=2))
+
 
 def _predict_next_season(model, full_df, latest_df, feat_cols,
                           target_col, pred_col, marcel_fn, avg_val) -> pd.DataFrame:

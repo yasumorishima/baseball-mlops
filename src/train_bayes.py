@@ -446,6 +446,12 @@ def run():
     _update_batter_predictions(bat_df, pipe_bat, sigma_bat, pf_lookup=pf_lookup)
     _update_pitcher_predictions(pit_df, pipe_pit, sigma_pit, pf_lookup=pf_lookup)
 
+    # アンサンブル用に Bayes MAE を追記
+    metrics_path = PRED_DIR / "model_metrics.json"
+    metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+    metrics.update({"bayes_mae_woba": round(bayes_mae_bat, 4), "bayes_mae_xfip": round(bayes_mae_pit, 4)})
+    metrics_path.write_text(json.dumps(metrics, indent=2))
+
     print("=== train_bayes.py complete ===")
 
 
