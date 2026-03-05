@@ -8,7 +8,7 @@ on:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     permissions:
       contents: write   # predictions/ の自動コミット & プッシュに必要
 
@@ -59,6 +59,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add predictions/
           git diff --staged --quiet || git commit -m "chore: update predictions [skip ci]"
+          git pull --rebase origin ${{ github.ref_name }}
           git push
 
       - name: Upload predictions as artifact
@@ -68,3 +69,43 @@ jobs:
           path: predictions/
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Notify Discord (success)
+        if: success()
+        run: |
+          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"✅ baseball-mlops 再学習完了\",
+                \"color\": 3066993,
+                \"fields\": [
+                  {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
+                  {\"name\": \"トリガー\", \"value\": \"${{ github.event_name }}\", \"inline\": true},
+                  {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
+                ],
+                \"footer\": {\"text\": \"Optuna 1000 trials + Bayes CI\"}
+              }]
+            }"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Notify Discord (failure)
+        if: failure()
+        run: |
+          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"❌ baseball-mlops 再学習失敗\",
+                \"color\": 15158332,
+                \"fields\": [
+                  {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
+                  {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
+                ]
+              }]
+            }"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        continue-on-error: true

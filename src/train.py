@@ -374,7 +374,7 @@ def save_to_wandb(model, mae: float, target: str, feature_names: list, config: d
     return artifact
 
 
-OPTUNA_TRIALS = 200
+OPTUNA_TRIALS = 1000
 
 
 def run_training():
