@@ -51,7 +51,8 @@ MIN_PREV_SEASON = 2020
 # >100 = 打者有利, <100 = 投手有利
 # ---------------------------------------------------------------------------
 
-PARK_FACTORS: dict[str, int] = {
+# 静的フォールバック（savant-extras から動的取得できない場合に使用）
+_PF_FALLBACK: dict[str, int] = {
     "COL": 118, "CIN": 111, "BOS": 108, "TEX": 107, "NYY": 106,
     "PHI": 105, "MIL": 105, "ATL": 104, "LAA": 103, "ANA": 103,
     "CWS": 103, "CHW": 103, "HOU": 102, "TOR": 102, "STL": 101,
@@ -106,7 +107,16 @@ BAYES_FEAT_P = _PIT_RAW + _PIT_ENG
 # ---------------------------------------------------------------------------
 
 def _park(team: str) -> float:
-    return float(PARK_FACTORS.get(str(team).strip(), 100))
+    return float(_PF_FALLBACK.get(str(team).strip(), 100))
+
+
+def _load_park_factors() -> dict | None:
+    """park_factors.csv から (season, team) → pf_5yr の辞書を返す。なければ None。"""
+    path = RAW_DIR / "park_factors.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    return {(int(r.season), str(r.team)): float(r.pf_5yr) for _, r in df.iterrows()}
 
 
 def _eng_batter(row: pd.Series) -> dict:
@@ -141,7 +151,8 @@ def _eng_pitcher(row: pd.Series) -> dict:
 def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                          marcel_fn, avg_val: float,
                          target_col: str,
-                         min_prev_season: int = MIN_PREV_SEASON) -> pd.DataFrame:
+                         min_prev_season: int = MIN_PREV_SEASON,
+                         pf_lookup: dict | None = None) -> pd.DataFrame:
     """
     y = actual(t+1) - marcel_pred(t+1)
     X = t 時点の raw + engineered 特徴量
@@ -175,6 +186,12 @@ def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                          for f in raw_cols}
             # engineered features (base)
             eng_feats = eng_fn(prev_row)
+
+            # 動的 park_factor で静的フォールバックを上書き
+            if pf_lookup:
+                pf = pf_lookup.get((year - 1, str(prev_row.get("Team", "")).strip()))
+                if pf:
+                    eng_feats["park_factor"] = pf
 
             # チーム変更フラグ・G前年比（2年前データが必要）
             prev2 = df[(df["player"] == player) & (df["season"] == year - 2)]
@@ -289,11 +306,19 @@ def run():
 
     coef_path = PRED_DIR / "bayes_coef.json"
 
+    # park_factors.csv から動的辞書をロード（なければ静的フォールバックを使用）
+    pf_lookup = _load_park_factors()
+    if pf_lookup:
+        print(f"  park_factors loaded: {len(pf_lookup)} entries (dynamic)")
+    else:
+        print("  park_factors.csv not found — using static _PF_FALLBACK")
+
     # ===== 打者 wOBA =====
     print("=== Batter Bayes (wOBA) ===")
     bat_df = pd.read_csv(RAW_DIR / "batter_features.csv")
     delta_bat = build_delta_dataset(
-        bat_df, _BAT_RAW, _eng_batter, marcel_woba, MLB_AVG_WOBA, "wOBA"
+        bat_df, _BAT_RAW, _eng_batter, marcel_woba, MLB_AVG_WOBA, "wOBA",
+        pf_lookup=pf_lookup,
     )
     print(f"  delta dataset: {len(delta_bat)} samples")
 
@@ -314,7 +339,8 @@ def run():
     print("=== Pitcher Bayes (xFIP) ===")
     pit_df = pd.read_csv(RAW_DIR / "pitcher_features.csv")
     delta_pit = build_delta_dataset(
-        pit_df, _PIT_RAW, _eng_pitcher, marcel_xfip, MLB_AVG_XFIP, "xFIP"
+        pit_df, _PIT_RAW, _eng_pitcher, marcel_xfip, MLB_AVG_XFIP, "xFIP",
+        pf_lookup=pf_lookup,
     )
     print(f"  delta dataset: {len(delta_pit)} samples")
 
@@ -357,13 +383,14 @@ def run():
     run_wb.finish()
 
     # ===== predictions CSV に bayes 列を追記 =====
-    _update_batter_predictions(bat_df, pipe_bat, sigma_bat)
-    _update_pitcher_predictions(pit_df, pipe_pit, sigma_pit)
+    _update_batter_predictions(bat_df, pipe_bat, sigma_bat, pf_lookup=pf_lookup)
+    _update_pitcher_predictions(pit_df, pipe_pit, sigma_pit, pf_lookup=pf_lookup)
 
     print("=== train_bayes.py complete ===")
 
 
-def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: float):
+def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: float,
+                                pf_lookup: dict | None = None):
     pred_path = PRED_DIR / "batter_predictions.csv"
     if not pred_path.exists():
         return
@@ -382,6 +409,12 @@ def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: floa
         raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
                      for f in _BAT_RAW}
         eng_feats = _eng_batter(prev_row)
+
+        # 動的 park_factor で上書き
+        if pf_lookup:
+            pf = pf_lookup.get((season_last, str(prev_row.get("Team", "")).strip()))
+            if pf:
+                eng_feats["park_factor"] = pf
 
         # チーム変更フラグ・G前年比
         prev2     = bat_df[(bat_df["player"] == player) & (bat_df["season"] == season_last - 1)]
@@ -414,7 +447,8 @@ def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: floa
     print(f"Batter predictions updated: {pred_path}")
 
 
-def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: float):
+def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: float,
+                                 pf_lookup: dict | None = None):
     pred_path = PRED_DIR / "pitcher_predictions.csv"
     if not pred_path.exists():
         return
@@ -433,6 +467,12 @@ def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: flo
         raw_feats = {f: (float(prev_row[f]) if f in prev_row.index and pd.notna(prev_row.get(f)) else np.nan)
                      for f in _PIT_RAW}
         eng_feats = _eng_pitcher(prev_row)
+
+        # 動的 park_factor で上書き
+        if pf_lookup:
+            pf = pf_lookup.get((season_last, str(prev_row.get("Team", "")).strip()))
+            if pf:
+                eng_feats["park_factor"] = pf
 
         # チーム変更フラグ・G前年比
         prev2     = pit_df[(pit_df["player"] == player) & (pit_df["season"] == season_last - 1)]
