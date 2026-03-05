@@ -135,6 +135,39 @@ PITCHER_FEATURES = [
 ]
 
 
+def _bat_delta_features(feats: dict) -> None:
+    """打者ラグ差分・交互作用項をインプレースで追加"""
+    def _d(a, b):
+        v = feats.get(a, np.nan), feats.get(b, np.nan)
+        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+
+    feats["wOBA_delta_1"]   = _d("wOBA_y1",       "wOBA_y2")
+    feats["xwOBA_delta_1"]  = _d("xwOBA_y1",      "xwOBA_y2")
+    feats["K_pct_delta_1"]  = _d("K%_y1",         "K%_y2")
+    feats["BB_pct_delta_1"] = _d("BB%_y1",        "BB%_y2")
+    feats["brl_delta_1"]    = _d("brl_percent_y1", "brl_percent_y2")
+    xwoba = feats.get("xwOBA_y1", np.nan)
+    woba  = feats.get("wOBA_y1",  np.nan)
+    age   = feats.get("Age_y1",   np.nan)
+    luck  = (xwoba - woba) if not (np.isnan(xwoba) or np.isnan(woba)) else np.nan
+    feats["age_x_luck"] = age * luck if not (np.isnan(age) or np.isnan(luck)) else np.nan
+
+
+def _pit_delta_features(feats: dict) -> None:
+    """投手ラグ差分・交互作用項をインプレースで追加"""
+    def _d(a, b):
+        v = feats.get(a, np.nan), feats.get(b, np.nan)
+        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+
+    feats["xFIP_delta_1"]   = _d("xFIP_y1",   "xFIP_y2")
+    feats["K_pct_delta_1"]  = _d("K%_y1",     "K%_y2")
+    feats["BB_pct_delta_1"] = _d("BB%_y1",    "BB%_y2")
+    feats["KBB_delta_1"]    = _d("K-BB%_y1",  "K-BB%_y2")
+    kbb = feats.get("K-BB%_y1", np.nan)
+    age = feats.get("Age_y1",   np.nan)
+    feats["age_x_kbb"] = age * kbb if not (np.isnan(age) or np.isnan(kbb)) else np.nan
+
+
 def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
     """翌年 wOBA をターゲットとした学習データを構築"""
     records = []
@@ -154,6 +187,8 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
                 else:
                     for f in BATTER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
+
+            _bat_delta_features(feats)
 
             # Marcel ベースライン
             feats["marcel_woba"] = marcel_woba(df, player, year) or np.nan
@@ -184,6 +219,8 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
                 else:
                     for f in PITCHER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
+
+            _pit_delta_features(feats)
 
             feats["marcel_xfip"] = marcel_xfip(df, player, year) or np.nan
             feats["target_xfip"] = row["xFIP"]
@@ -464,9 +501,11 @@ def run_training():
     pit_df_latest = pit_df[pit_df["season"] == pit_df["season"].max()]
 
     bat_preds = _predict_next_season(model_bat, bat_df, bat_df_latest, feat_cols_bat,
-                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA)
+                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA,
+                                     delta_fn=_bat_delta_features)
     pit_preds = _predict_next_season(model_pit, pit_df, pit_df_latest, feat_cols_pit,
-                                     "xFIP", "pred_xfip", marcel_xfip, MLB_AVG_XFIP)
+                                     "xFIP", "pred_xfip", marcel_xfip, MLB_AVG_XFIP,
+                                     delta_fn=_pit_delta_features)
 
     bat_preds.to_csv(PROJ_DIR / "batter_predictions.csv", index=False)
     pit_preds.to_csv(PROJ_DIR / "pitcher_predictions.csv", index=False)
@@ -482,7 +521,8 @@ def run_training():
 
 
 def _predict_next_season(model, full_df, latest_df, feat_cols,
-                          target_col, pred_col, marcel_fn, avg_val) -> pd.DataFrame:
+                          target_col, pred_col, marcel_fn, avg_val,
+                          delta_fn=None) -> pd.DataFrame:
     """最新シーズンの選手について翌年予測を生成"""
     next_year = int(latest_df["season"].max()) + 1
     records = []
@@ -506,6 +546,9 @@ def _predict_next_season(model, full_df, latest_df, feat_cols,
                 for f in [c for c in feat_cols if c.endswith(suffix)]:
                     base = f.replace(suffix, "")
                     feats[f] = prev.iloc[0].get(base, np.nan) if len(prev) > 0 else np.nan
+
+        if delta_fn is not None:
+            delta_fn(feats)
 
         marcel_val = (marcel_fn(full_df, player, next_year) or avg_val)
         feats["marcel_" + target_col.lower().replace("/", "")] = marcel_val
