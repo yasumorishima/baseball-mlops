@@ -32,12 +32,11 @@ import wandb
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, str(Path(__file__).parent))
-from train import MLB_AVG_WOBA, MLB_AVG_XFIP, marcel_woba, marcel_xfip
+from train import MLB_AVG_WOBA, MLB_AVG_XFIP, marcel_woba, marcel_xfip, _time_cv_splits
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RAW_DIR  = DATA_DIR / "raw"
@@ -250,15 +249,23 @@ def _make_pipeline(alpha: float, l1_ratio: float = 0.5) -> Pipeline:
     ])
 
 
-def find_hyperparams(X: np.ndarray, y: np.ndarray,
+def find_hyperparams(X: np.ndarray, y: np.ndarray, seasons: np.ndarray,
                      alphas: list, l1_ratios: list) -> tuple[float, float]:
-    """5-fold CV MAE で最良 (alpha, l1_ratio) を選択"""
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    """時系列 expanding-window CV MAE で最良 (alpha, l1_ratio) を選択。
+
+    seasons に基づく walk-forward splits を使用（未来リーク防止）。
+    """
+    splits = _time_cv_splits(seasons)
     best_params, best_mae = (alphas[0], l1_ratios[0]), float("inf")
     for alpha in alphas:
         for l1_ratio in l1_ratios:
-            oof = cross_val_predict(_make_pipeline(alpha, l1_ratio), X, y, cv=kf)
-            mae = mean_absolute_error(y, oof)
+            pipe = _make_pipeline(alpha, l1_ratio)
+            oof = np.full(len(y), np.nan)
+            for tr_idx, va_idx in splits:
+                pipe.fit(X[tr_idx], y[tr_idx])
+                oof[va_idx] = pipe.predict(X[va_idx])
+            valid = ~np.isnan(oof)
+            mae = mean_absolute_error(y[valid], oof[valid])
             if mae < best_mae:
                 best_mae, best_params = mae, (alpha, l1_ratio)
     return best_params
@@ -363,11 +370,17 @@ def run():
     y_bat = delta_bat["delta"].values.astype(float)
     w_bat = recency_weights(delta_bat["season"].values)
 
-    alpha_bat, l1_bat   = find_hyperparams(X_bat, y_bat, ALPHAS, L1_RATIOS)
+    seasons_bat = delta_bat["season"].values.astype(int)
+    alpha_bat, l1_bat   = find_hyperparams(X_bat, y_bat, seasons_bat, ALPHAS, L1_RATIOS)
     pipe_bat, sigma_bat = fit_pipeline(X_bat, y_bat, alpha_bat, l1_bat, w_bat)
-    oof_bat             = cross_val_predict(_make_pipeline(alpha_bat, l1_bat), X_bat, y_bat,
-                                            cv=KFold(5, shuffle=True, random_state=42))
-    bayes_mae_bat = float(mean_absolute_error(y_bat, oof_bat))
+    # 計測も同じ時系列 splits で（find_hyperparams 内部と一貫）
+    oof_bat_cv = np.full(len(y_bat), np.nan)
+    for tr_i, va_i in _time_cv_splits(seasons_bat):
+        _p = _make_pipeline(alpha_bat, l1_bat)
+        _p.fit(X_bat[tr_i], y_bat[tr_i])
+        oof_bat_cv[va_i] = _p.predict(X_bat[va_i])
+    valid_bat = ~np.isnan(oof_bat_cv)
+    bayes_mae_bat = float(mean_absolute_error(y_bat[valid_bat], oof_bat_cv[valid_bat]))
     print(f"  alpha={alpha_bat}, l1={l1_bat}, sigma={sigma_bat:.4f}, delta MAE={bayes_mae_bat:.4f}")
     save_coef(pipe_bat, feat_cols_bat, coef_path, "batter")
 
@@ -387,11 +400,16 @@ def run():
     y_pit = delta_pit["delta"].values.astype(float)
     w_pit = recency_weights(delta_pit["season"].values)
 
-    alpha_pit, l1_pit   = find_hyperparams(X_pit, y_pit, ALPHAS, L1_RATIOS)
+    seasons_pit = delta_pit["season"].values.astype(int)
+    alpha_pit, l1_pit   = find_hyperparams(X_pit, y_pit, seasons_pit, ALPHAS, L1_RATIOS)
     pipe_pit, sigma_pit = fit_pipeline(X_pit, y_pit, alpha_pit, l1_pit, w_pit)
-    oof_pit             = cross_val_predict(_make_pipeline(alpha_pit, l1_pit), X_pit, y_pit,
-                                            cv=KFold(5, shuffle=True, random_state=42))
-    bayes_mae_pit = float(mean_absolute_error(y_pit, oof_pit))
+    oof_pit_cv = np.full(len(y_pit), np.nan)
+    for tr_i, va_i in _time_cv_splits(seasons_pit):
+        _p = _make_pipeline(alpha_pit, l1_pit)
+        _p.fit(X_pit[tr_i], y_pit[tr_i])
+        oof_pit_cv[va_i] = _p.predict(X_pit[va_i])
+    valid_pit = ~np.isnan(oof_pit_cv)
+    bayes_mae_pit = float(mean_absolute_error(y_pit[valid_pit], oof_pit_cv[valid_pit]))
     print(f"  alpha={alpha_pit}, l1={l1_pit}, sigma={sigma_pit:.4f}, delta MAE={bayes_mae_pit:.4f}")
     save_coef(pipe_pit, feat_cols_pit, coef_path, "pitcher")
 

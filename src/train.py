@@ -15,7 +15,6 @@ import pandas as pd
 import joblib
 import lightgbm as lgb
 import wandb
-from sklearn.model_selection import KFold
 from sklearn.metrics import mean_absolute_error
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -196,6 +195,22 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
 # 学習
 # ---------------------------------------------------------------------------
 
+def _time_cv_splits(seasons: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    """年単位 expanding window splits（最低2年の学習データを確保）。
+
+    fold i: train = seasons < val_year, val = seasons == val_year
+    unique_years の先頭2年はtraining onlyに使い、3年目以降をval年とする。
+    """
+    unique_years = sorted(np.unique(seasons))
+    splits = []
+    for val_year in unique_years[2:]:
+        train_idx = np.where(seasons < val_year)[0]
+        val_idx   = np.where(seasons == val_year)[0]
+        if len(train_idx) > 0 and len(val_idx) > 0:
+            splits.append((train_idx, val_idx))
+    return splits
+
+
 LGB_PARAMS = {
     "objective": "regression",
     "metric": "mae",
@@ -210,13 +225,23 @@ LGB_PARAMS = {
 }
 
 
-def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
-    """5-fold CV で LightGBM を学習、MAE・最終モデル・OOF予測を返す"""
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    oof = np.zeros(len(y))
+def train_model(X: pd.DataFrame, y: pd.Series, params: dict,
+                seasons: np.ndarray | None = None) -> tuple:
+    """時系列 expanding-window CV で LightGBM を学習し MAE・最終モデル・OOF を返す。
+
+    seasons を渡すと年単位の walk-forward splits を使用（未来リーク防止）。
+    None の場合は 5-fold random CV（後方互換）。
+    """
+    if seasons is not None:
+        splits = _time_cv_splits(seasons)
+    else:
+        from sklearn.model_selection import KFold
+        splits = list(KFold(n_splits=5, shuffle=True, random_state=42).split(X))
+
+    oof = np.full(len(y), np.nan)
     models = []
 
-    for fold, (tr_idx, va_idx) in enumerate(kf.split(X)):
+    for tr_idx, va_idx in splits:
         X_tr, X_va = X.iloc[tr_idx], X.iloc[va_idx]
         y_tr, y_va = y.iloc[tr_idx], y.iloc[va_idx]
         model = lgb.LGBMRegressor(**params)
@@ -226,7 +251,8 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
         oof[va_idx] = model.predict(X_va)
         models.append(model)
 
-    mae = mean_absolute_error(y, oof)
+    valid = ~np.isnan(oof)
+    mae = mean_absolute_error(y[valid], oof[valid])
     # 全データで再学習（最終モデル）
     final = lgb.LGBMRegressor(**params)
     final.fit(X, y)
@@ -299,7 +325,9 @@ def run_training():
     X_bat = train_bat[feat_cols_bat].apply(pd.to_numeric, errors="coerce")
     y_bat = train_bat["target_woba"]
 
-    model_bat, mae_bat, _, oof_bat = train_model(X_bat, y_bat, LGB_PARAMS)
+    model_bat, mae_bat, _, oof_bat = train_model(
+        X_bat, y_bat, LGB_PARAMS, seasons=train_bat["season"].values
+    )
     print(f"  ML  MAE wOBA: {mae_bat:.4f}")
 
     # Marcel ベースライン MAE
@@ -307,10 +335,12 @@ def run_training():
     print(f"  Marcel MAE wOBA: {marcel_mae_bat:.4f}")
 
     # OOF 保存（train_bayes.py のスタッキング用）
+    # time-series CV では先頭2年分は val に入らないため NaN → 除外
+    oof_mask_bat = ~np.isnan(oof_bat)
     pd.DataFrame({
-        "player": train_bat["player"].values,
-        "season": train_bat["season"].values,
-        "lgb_woba_oof": oof_bat,
+        "player": train_bat["player"].values[oof_mask_bat],
+        "season": train_bat["season"].values[oof_mask_bat],
+        "lgb_woba_oof": oof_bat[oof_mask_bat],
     }).to_csv(RAW_DIR / "lgb_oof_batter.csv", index=False)
 
     save_to_wandb(model_bat, mae_bat, "woba", feat_cols_bat,
@@ -327,17 +357,20 @@ def run_training():
     X_pit = train_pit[feat_cols_pit].apply(pd.to_numeric, errors="coerce")
     y_pit = train_pit["target_xfip"]
 
-    model_pit, mae_pit, _, oof_pit = train_model(X_pit, y_pit, LGB_PARAMS)
+    model_pit, mae_pit, _, oof_pit = train_model(
+        X_pit, y_pit, LGB_PARAMS, seasons=train_pit["season"].values
+    )
     print(f"  ML  MAE xFIP: {mae_pit:.4f}")
 
     marcel_mae_pit = mean_absolute_error(y_pit, train_pit["marcel_xfip"].fillna(MLB_AVG_XFIP))
     print(f"  Marcel MAE xFIP: {marcel_mae_pit:.4f}")
 
-    # OOF 保存（train_bayes.py のスタッキング用）
+    # OOF 保存（time-series CV: 先頭2年分は NaN → 除外）
+    oof_mask_pit = ~np.isnan(oof_pit)
     pd.DataFrame({
-        "player": train_pit["player"].values,
-        "season": train_pit["season"].values,
-        "lgb_xfip_oof": oof_pit,
+        "player": train_pit["player"].values[oof_mask_pit],
+        "season": train_pit["season"].values[oof_mask_pit],
+        "lgb_xfip_oof": oof_pit[oof_mask_pit],
     }).to_csv(RAW_DIR / "lgb_oof_pitcher.csv", index=False)
 
     save_to_wandb(model_pit, mae_pit, "xfip", feat_cols_pit,
