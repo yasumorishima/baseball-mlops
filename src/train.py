@@ -104,8 +104,10 @@ def marcel_xfip(df: pd.DataFrame, player: str, year: int) -> float | None:
 
 # FanGraphs カラム名 (大文字) + Statcast カラム名 (小文字 / snake_case)
 BATTER_FEATURES = [
-    # FanGraphs
+    # FanGraphs (既存)
     "wOBA", "xwOBA", "K%", "BB%", "ISO", "BABIP", "OBP", "SLG",
+    # FanGraphs (追加 v5)
+    "SwStr%", "HardHit%", "Contact%", "O-Swing%", "G",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba",
     # Statcast exit velo / barrels
@@ -118,8 +120,10 @@ BATTER_FEATURES = [
 ]
 
 PITCHER_FEATURES = [
-    # FanGraphs
+    # FanGraphs (既存)
     "xFIP", "FIP", "ERA", "K%", "BB%", "HR/9", "WHIP", "BABIP", "LOB%",
+    # FanGraphs (追加 v5)
+    "SwStr%", "K-BB%", "CSW%", "G",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba", "est_era",
     # Statcast exit velo (被打球)
@@ -207,7 +211,7 @@ LGB_PARAMS = {
 
 
 def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
-    """5-fold CV で LightGBM を学習、MAE と最終モデルを返す"""
+    """5-fold CV で LightGBM を学習、MAE・最終モデル・OOF予測を返す"""
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     oof = np.zeros(len(y))
     models = []
@@ -226,7 +230,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
     # 全データで再学習（最終モデル）
     final = lgb.LGBMRegressor(**params)
     final.fit(X, y)
-    return final, mae, models
+    return final, mae, models, oof
 
 
 def save_to_wandb(model, mae: float, target: str, feature_names: list, config: dict):
@@ -295,12 +299,19 @@ def run_training():
     X_bat = train_bat[feat_cols_bat].apply(pd.to_numeric, errors="coerce")
     y_bat = train_bat["target_woba"]
 
-    model_bat, mae_bat, _ = train_model(X_bat, y_bat, LGB_PARAMS)
+    model_bat, mae_bat, _, oof_bat = train_model(X_bat, y_bat, LGB_PARAMS)
     print(f"  ML  MAE wOBA: {mae_bat:.4f}")
 
     # Marcel ベースライン MAE
     marcel_mae_bat = mean_absolute_error(y_bat, train_bat["marcel_woba"].fillna(MLB_AVG_WOBA))
     print(f"  Marcel MAE wOBA: {marcel_mae_bat:.4f}")
+
+    # OOF 保存（train_bayes.py のスタッキング用）
+    pd.DataFrame({
+        "player": train_bat["player"].values,
+        "season": train_bat["season"].values,
+        "lgb_woba_oof": oof_bat,
+    }).to_csv(RAW_DIR / "lgb_oof_batter.csv", index=False)
 
     save_to_wandb(model_bat, mae_bat, "woba", feat_cols_bat,
                   {"marcel_mae": marcel_mae_bat, "n_samples": len(X_bat)})
@@ -316,11 +327,18 @@ def run_training():
     X_pit = train_pit[feat_cols_pit].apply(pd.to_numeric, errors="coerce")
     y_pit = train_pit["target_xfip"]
 
-    model_pit, mae_pit, _ = train_model(X_pit, y_pit, LGB_PARAMS)
+    model_pit, mae_pit, _, oof_pit = train_model(X_pit, y_pit, LGB_PARAMS)
     print(f"  ML  MAE xFIP: {mae_pit:.4f}")
 
     marcel_mae_pit = mean_absolute_error(y_pit, train_pit["marcel_xfip"].fillna(MLB_AVG_XFIP))
     print(f"  Marcel MAE xFIP: {marcel_mae_pit:.4f}")
+
+    # OOF 保存（train_bayes.py のスタッキング用）
+    pd.DataFrame({
+        "player": train_pit["player"].values,
+        "season": train_pit["season"].values,
+        "lgb_xfip_oof": oof_pit,
+    }).to_csv(RAW_DIR / "lgb_oof_pitcher.csv", index=False)
 
     save_to_wandb(model_pit, mae_pit, "xfip", feat_cols_pit,
                   {"marcel_mae": marcel_mae_pit, "n_samples": len(X_pit)})
