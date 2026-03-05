@@ -1,6 +1,7 @@
 pybaseball>=2.2.5
 savant-extras>=0.3.3
 lightgbm>=4.3.0
+optuna>=3.6.0
 wandb>=0.16.0
 fastapi>=0.110.0
 uvicorn>=0.29.0
