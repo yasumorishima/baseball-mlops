@@ -14,13 +14,14 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 
 ## 精度（時系列 CV バックテスト）
 
-| | LightGBM | Marcel 法 | Bayes (ElasticNet) |
-|---|---|---|---|
-| 打者 wOBA MAE | **0.0299** | 0.0326 | Δ-MAE: **0.0287** |
-| 投手 xFIP MAE | **0.5405** | 0.5576 | Δ-MAE: **0.4810** |
+| | Marcel 法 | LightGBM | Bayes (ElasticNet) | Ensemble |
+|---|---|---|---|---|
+| 打者 wOBA MAE | 0.0326 | 0.0294 | **0.0286** | 逆MAE重み付き |
+| 投手 xFIP MAE | 0.5576 | 0.5331 | **0.4815** | 逆MAE重み付き |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
 ※ LightGBM は Optuna 1000 トライアル最適化済み（TPESampler + MedianPruner）
+※ Ensemble = Marcel × 31% + LGB × 33% + Bayes × 36%（逆MAE比で自動算出）
 
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
 MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等）を使うことで ML が上回った。
@@ -54,6 +55,8 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
                         OOF を lgb_oof_batter/pitcher.csv に保存（Bayes スタッキング用）
   ↓ train_bayes.py      ElasticNet で Marcel 残差を学習（lgb_delta スタッキング特徴量）
                         Monte Carlo CI (80%) 付与、bayes_coef.json 保存
+  ↓ ensemble.py         逆MAE重み付き平均（Marcel + LGB + Bayes）
+                        model_metrics.json から重みを自動算出、W&B にログ
   ↓ W&B Artifact 保存   MAE / 特徴量重要度 / Optuna best_params / モデルファイル
   ↓ production タグ更新  MAE 改善時のみ自動昇格
   ↓ predictions/ コミット Streamlit Cloud が直接読み込む
@@ -84,13 +87,15 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 - **CI**: MC サンプリング N(delta_hat, σ) × 5000 → 10th/90th パーセンタイル = 80% CI
 - **Recency Decay**: 0.85/年で近年サンプルを重み付け
 
-### 特徴量（打者: 25個 / 投手: 23個）
+### 特徴量（打者: 31個 / 投手: 28個）
 | カテゴリ | 打者 | 投手 |
 |---|---|---|
 | Statcast | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/avg_hit_angle/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/avg_hit_angle/ev95percent |
 | FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G/maxEV | K-BB%/CSW%/SwStr%/G/IP |
 | FanGraphs (2020+) | — | Stuff+/Location+/Pitching+ |
 | Engineered | age_from_peak/age_sq/pa_rate/xwoba_luck/park_factor/team_changed/g_change_rate | age_from_peak/age_sq/ip_rate/park_factor/team_changed/g_change_rate |
+| **Lag delta (v6)** | **wOBA_delta_1/xwOBA_delta_1/K_pct_delta_1/BB_pct_delta_1/brl_delta_1** | **xFIP_delta_1/K_pct_delta_1/BB_pct_delta_1/KBB_delta_1** |
+| **Interaction (v6)** | **age_x_luck**（Age × xwOBA-wOBA乖離） | **age_x_kbb**（Age × K-BB%） |
 | Stacking | lgb_delta | lgb_delta |
 
 ---
