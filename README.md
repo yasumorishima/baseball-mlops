@@ -20,7 +20,7 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 | 投手 xFIP MAE | **0.5405** | 0.5576 | Δ-MAE: **0.4810** |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
-※ LightGBM は Optuna 200 トライアル最適化済み（TPESampler + MedianPruner）
+※ LightGBM は Optuna 1000 トライアル最適化済み（TPESampler + MedianPruner）
 
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
 MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等）を使うことで ML が上回った。
@@ -32,7 +32,7 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 | 項目 | 内容 |
 |---|---|
 | 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
-| モデル | LightGBM（Optuna 200trial 最適化 + 時系列 expanding-window CV） |
+| モデル | LightGBM（Optuna 1000trial 最適化 + 時系列 expanding-window CV） |
 | ベースライン | MLB Marcel 法（加重平均 + 平均回帰 + 年齢調整） |
 | Bayes 補正 | ElasticNet で Marcel 残差を予測、80% MC CI 付与 |
 | データ | MLB Statcast via pybaseball（EV / Barrel% / xwOBA / sprint speed 等）|
@@ -49,7 +49,7 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 ```
 [GitHub Actions — 毎週月曜 JST 11:00]
   ↓ fetch_statcast.py   pybaseball → FanGraphs + Statcast + park_factors CSV 取得
-  ↓ train.py            Optuna 200trial ハイパーパラメータ最適化
+  ↓ train.py            Optuna 1000trial ハイパーパラメータ最適化
                         時系列 expanding-window CV で LightGBM 再学習
                         OOF を lgb_oof_batter/pitcher.csv に保存（Bayes スタッキング用）
   ↓ train_bayes.py      ElasticNet で Marcel 残差を学習（lgb_delta スタッキング特徴量）
@@ -73,7 +73,7 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 
 ### LightGBM（train.py）
 - **CV**: 時系列 expanding-window splits（先頭2年 training only、3年目以降を val）
-- **最適化**: Optuna 200トライアル（TPESampler + MedianPruner）
+- **最適化**: Optuna 1000トライアル（TPESampler + MedianPruner）
   - 探索パラメータ: `learning_rate` / `num_leaves` / `min_child_samples` / `feature_fraction` / `bagging_fraction` / `reg_alpha` / `reg_lambda`
   - `n_estimators` 上限 1000 + early_stopping=50 で自動打ち切り
 
