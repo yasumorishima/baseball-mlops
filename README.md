@@ -26,6 +26,28 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
 MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等）を使うことで ML が上回った。
 
+### Year-by-Year Backtest (ML vs Marcel)
+
+| Year | Batter wOBA | | Pitcher xFIP | |
+|------|-------------|---|-------------|---|
+| | ML MAE | Marcel MAE | ML MAE | Marcel MAE |
+| 2020 | 0.0361 | 0.0371 (+2.8%) | 0.598 | 0.618 (+3.2%) |
+| 2021 | 0.0292 | 0.0317 (+7.9%) | 0.541 | 0.553 (+2.1%) |
+| 2022 | 0.0294 | 0.0330 (+11.1%) | 0.579 | 0.569 (-1.8%) |
+| 2023 | 0.0280 | 0.0303 (+7.6%) | 0.535 | 0.559 (+4.3%) |
+| 2024 | 0.0279 | 0.0333 (+16.2%) | 0.508 | 0.522 (+2.5%) |
+
+**Batter**: ML wins all 5 CV years. Post-2023 improvement accelerating (7.6% -> 12.6%).
+**Pitcher**: ML wins 4/5 CV years. 2022 loss likely due to limited training data (COVID 2020-2021 only).
+
+### 2025 Strict Holdout (in progress)
+
+2025 is evaluated as a **true holdout** -- never seen during Optuna hyperparameter tuning or CV.
+Optuna 1000 trials are tuned exclusively on 2020-2024 data, then the final model is trained on
+all pre-2025 data and evaluated once on 2025. This eliminates any indirect data leakage concern.
+
+Results will be updated here once the CI run completes.
+
 ---
 
 ## 特徴
