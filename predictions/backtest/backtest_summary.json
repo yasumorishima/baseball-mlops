@@ -1,21 +1,21 @@
 {
   "batter": {
-    "yearly": [
+    "cv_yearly": [
       {
         "year": 2020,
         "n_players": 310,
-        "ml_mae": 0.0361,
+        "ml_mae": 0.036,
         "marcel_mae": 0.0371,
         "ml_wins": true,
-        "improvement_pct": 2.8
+        "improvement_pct": 3.0
       },
       {
         "year": 2021,
         "n_players": 463,
-        "ml_mae": 0.0292,
+        "ml_mae": 0.0293,
         "marcel_mae": 0.0317,
         "ml_wins": true,
-        "improvement_pct": 7.9
+        "improvement_pct": 7.6
       },
       {
         "year": 2022,
@@ -23,31 +23,23 @@
         "ml_mae": 0.0294,
         "marcel_mae": 0.033,
         "ml_wins": true,
-        "improvement_pct": 11.1
+        "improvement_pct": 10.9
       },
       {
         "year": 2023,
         "n_players": 461,
-        "ml_mae": 0.028,
+        "ml_mae": 0.0278,
         "marcel_mae": 0.0303,
         "ml_wins": true,
-        "improvement_pct": 7.6
+        "improvement_pct": 8.4
       },
       {
         "year": 2024,
         "n_players": 455,
-        "ml_mae": 0.0279,
+        "ml_mae": 0.0281,
         "marcel_mae": 0.0333,
         "ml_wins": true,
-        "improvement_pct": 16.2
-      },
-      {
-        "year": 2025,
-        "n_players": 475,
-        "ml_mae": 0.0286,
-        "marcel_mae": 0.0331,
-        "ml_wins": true,
-        "improvement_pct": 13.5
+        "improvement_pct": 15.8
       }
     ],
     "era_split": {
@@ -61,74 +53,74 @@
         "ml_mae_weighted": 0.031,
         "marcel_mae_weighted": 0.0335,
         "ml_wins_all_years": true,
-        "improvement_pct": 7.6
+        "improvement_pct": 7.5
       },
       "post_2023": {
         "years": [
           2023,
-          2024,
-          2025
+          2024
         ],
-        "n_players_total": 1391,
-        "ml_mae_weighted": 0.0282,
-        "marcel_mae_weighted": 0.0322,
+        "n_players_total": 916,
+        "ml_mae_weighted": 0.0279,
+        "marcel_mae_weighted": 0.0318,
         "ml_wins_all_years": true,
-        "improvement_pct": 12.6
+        "improvement_pct": 12.1
       }
     },
-    "ml_wins_all_years": true,
-    "total_years": 6,
-    "ml_win_years": 6
+    "holdout": {
+      "year": 2025,
+      "n_players": 475,
+      "ml_mae": 0.0295,
+      "marcel_mae": 0.0331,
+      "ml_wins": true,
+      "improvement_pct": 10.9,
+      "is_true_holdout": true
+    },
+    "cv_ml_wins_all_years": true,
+    "cv_total_years": 5,
+    "cv_ml_win_years": 5
   },
   "pitcher": {
-    "yearly": [
+    "cv_yearly": [
       {
         "year": 2020,
         "n_players": 158,
-        "ml_mae": 0.598,
+        "ml_mae": 0.5891,
         "marcel_mae": 0.6176,
         "ml_wins": true,
-        "improvement_pct": 3.2
+        "improvement_pct": 4.6
       },
       {
         "year": 2021,
         "n_players": 472,
-        "ml_mae": 0.5408,
+        "ml_mae": 0.5416,
         "marcel_mae": 0.5525,
         "ml_wins": true,
-        "improvement_pct": 2.1
+        "improvement_pct": 2.0
       },
       {
         "year": 2022,
         "n_players": 471,
-        "ml_mae": 0.5793,
+        "ml_mae": 0.58,
         "marcel_mae": 0.569,
         "ml_wins": false,
-        "improvement_pct": -1.8
+        "improvement_pct": -1.9
       },
       {
         "year": 2023,
         "n_players": 476,
-        "ml_mae": 0.5348,
+        "ml_mae": 0.5364,
         "marcel_mae": 0.5587,
         "ml_wins": true,
-        "improvement_pct": 4.3
+        "improvement_pct": 4.0
       },
       {
         "year": 2024,
         "n_players": 477,
-        "ml_mae": 0.5083,
+        "ml_mae": 0.5069,
         "marcel_mae": 0.5216,
         "ml_wins": true,
-        "improvement_pct": 2.5
-      },
-      {
-        "year": 2025,
-        "n_players": 475,
-        "ml_mae": 0.4762,
-        "marcel_mae": 0.5038,
-        "ml_wins": true,
-        "improvement_pct": 5.5
+        "improvement_pct": 2.8
       }
     ],
     "era_split": {
@@ -139,26 +131,34 @@
           2022
         ],
         "n_players_total": 1101,
-        "ml_mae_weighted": 0.5655,
+        "ml_mae_weighted": 0.5648,
         "marcel_mae_weighted": 0.5689,
         "ml_wins_all_years": false,
-        "improvement_pct": 0.6
+        "improvement_pct": 0.7
       },
       "post_2023": {
         "years": [
           2023,
-          2024,
-          2025
+          2024
         ],
-        "n_players_total": 1428,
-        "ml_mae_weighted": 0.5065,
-        "marcel_mae_weighted": 0.528,
+        "n_players_total": 953,
+        "ml_mae_weighted": 0.5216,
+        "marcel_mae_weighted": 0.5401,
         "ml_wins_all_years": true,
-        "improvement_pct": 4.1
+        "improvement_pct": 3.4
       }
     },
-    "ml_wins_all_years": false,
-    "total_years": 6,
-    "ml_win_years": 5
+    "holdout": {
+      "year": 2025,
+      "n_players": 475,
+      "ml_mae": 0.4865,
+      "marcel_mae": 0.5038,
+      "ml_wins": true,
+      "improvement_pct": 3.4,
+      "is_true_holdout": true
+    },
+    "cv_ml_wins_all_years": false,
+    "cv_total_years": 5,
+    "cv_ml_win_years": 4
   }
 }
