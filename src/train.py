@@ -135,41 +135,125 @@ PITCHER_FEATURES = [
 ]
 
 
+def _safe(val):
+    """NaN-safe check"""
+    try:
+        return not np.isnan(val)
+    except (TypeError, ValueError):
+        return val is not None
+
+
 def _bat_delta_features(feats: dict) -> None:
-    """打者ラグ差分・交互作用項をインプレースで追加"""
+    """打者ラグ差分・交互作用項・エンジニアリング特徴量をインプレースで追加"""
     def _d(a, b):
         v = feats.get(a, np.nan), feats.get(b, np.nan)
-        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+        return v[0] - v[1] if (_safe(v[0]) and _safe(v[1])) else np.nan
 
-    feats["wOBA_delta_1"]   = _d("wOBA_y1",       "wOBA_y2")
-    feats["xwOBA_delta_1"]  = _d("xwOBA_y1",      "xwOBA_y2")
-    feats["K_pct_delta_1"]  = _d("K%_y1",         "K%_y2")
-    feats["BB_pct_delta_1"] = _d("BB%_y1",        "BB%_y2")
-    feats["brl_delta_1"]    = _d("brl_percent_y1", "brl_percent_y2")
+    # --- v6: 1年ラグ差分 ---
+    feats["wOBA_delta_1"]   = _d("wOBA_y1",        "wOBA_y2")
+    feats["xwOBA_delta_1"]  = _d("xwOBA_y1",       "xwOBA_y2")
+    feats["K_pct_delta_1"]  = _d("K%_y1",          "K%_y2")
+    feats["BB_pct_delta_1"] = _d("BB%_y1",         "BB%_y2")
+    feats["brl_delta_1"]    = _d("brl_percent_y1",  "brl_percent_y2")
+
+    # --- v7: 2年ラグ差分（長期トレンド） ---
+    feats["wOBA_delta_2"]   = _d("wOBA_y2",        "wOBA_y3")
+
+    # --- v6: 交互作用 ---
     xwoba = feats.get("xwOBA_y1", np.nan)
     woba  = feats.get("wOBA_y1",  np.nan)
     age   = feats.get("Age_y1",   np.nan)
-    luck  = (xwoba - woba) if not (np.isnan(xwoba) or np.isnan(woba)) else np.nan
-    feats["age_x_luck"] = age * luck if not (np.isnan(age) or np.isnan(luck)) else np.nan
+    luck  = (xwoba - woba) if (_safe(xwoba) and _safe(woba)) else np.nan
+    feats["age_x_luck"] = age * luck if (_safe(age) and _safe(luck)) else np.nan
+
+    # --- v7: エンジニアリング特徴量 ---
+    # 年齢曲線（ピーク27歳）
+    if _safe(age):
+        feats["age_from_peak"] = age - 27
+        feats["age_sq"] = (age - 27) ** 2
+    else:
+        feats["age_from_peak"] = np.nan
+        feats["age_sq"] = np.nan
+
+    # 出場率（健康・レギュラー度合い）
+    pa = feats.get("PA_y1", np.nan)
+    feats["pa_rate"] = pa / 650.0 if _safe(pa) else np.nan
+
+    # 運の乖離（翌年回帰の強い予測因子）
+    feats["xwoba_luck"] = luck if _safe(luck) else np.nan
 
 
 def _pit_delta_features(feats: dict) -> None:
-    """投手ラグ差分・交互作用項をインプレースで追加"""
+    """投手ラグ差分・交互作用項・エンジニアリング特徴量をインプレースで追加"""
     def _d(a, b):
         v = feats.get(a, np.nan), feats.get(b, np.nan)
-        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+        return v[0] - v[1] if (_safe(v[0]) and _safe(v[1])) else np.nan
 
+    # --- v6: 1年ラグ差分 ---
     feats["xFIP_delta_1"]   = _d("xFIP_y1",   "xFIP_y2")
     feats["K_pct_delta_1"]  = _d("K%_y1",     "K%_y2")
     feats["BB_pct_delta_1"] = _d("BB%_y1",    "BB%_y2")
     feats["KBB_delta_1"]    = _d("K-BB%_y1",  "K-BB%_y2")
+
+    # --- v7: 2年ラグ差分（長期トレンド） ---
+    feats["xFIP_delta_2"]   = _d("xFIP_y2",   "xFIP_y3")
+
+    # --- v6: 交互作用 ---
     kbb = feats.get("K-BB%_y1", np.nan)
     age = feats.get("Age_y1",   np.nan)
-    feats["age_x_kbb"] = age * kbb if not (np.isnan(age) or np.isnan(kbb)) else np.nan
+    feats["age_x_kbb"] = age * kbb if (_safe(age) and _safe(kbb)) else np.nan
+
+    # --- v7: エンジニアリング特徴量 ---
+    if _safe(age):
+        feats["age_from_peak"] = age - 27
+        feats["age_sq"] = (age - 27) ** 2
+    else:
+        feats["age_from_peak"] = np.nan
+        feats["age_sq"] = np.nan
+
+    ip = feats.get("IP_y1", np.nan)
+    feats["ip_rate"] = ip / 200.0 if _safe(ip) else np.nan
+
+    era = feats.get("ERA_y1", np.nan)
+    fip = feats.get("FIP_y1", np.nan)
+    feats["fip_era_gap"] = (era - fip) if (_safe(era) and _safe(fip)) else np.nan
+
+
+def _load_park_factors() -> dict[tuple[str, int], float]:
+    """Park factors CSV を (team, season) → pf_5yr の辞書に変換"""
+    pf_path = RAW_DIR / "park_factors.csv"
+    if not pf_path.exists():
+        return {}
+    pf_df = pd.read_csv(pf_path)
+    # カラム名が異なる場合に対応
+    team_col = "team" if "team" in pf_df.columns else "Team"
+    season_col = "season" if "season" in pf_df.columns else "Season"
+    pf_col = "pf_5yr" if "pf_5yr" in pf_df.columns else "basic_5yr"
+    if pf_col not in pf_df.columns:
+        # フォールバック: 最初の数値カラムを使う
+        for c in pf_df.columns:
+            if pf_df[c].dtype in ("float64", "int64") and c not in (season_col,):
+                pf_col = c
+                break
+    result = {}
+    for _, r in pf_df.iterrows():
+        result[(str(r[team_col]), int(r[season_col]))] = float(r[pf_col])
+    return result
+
+
+_PARK_FACTORS: dict[tuple[str, int], float] | None = None
+
+
+def _get_park_factors() -> dict[tuple[str, int], float]:
+    global _PARK_FACTORS
+    if _PARK_FACTORS is None:
+        _PARK_FACTORS = _load_park_factors()
+    return _PARK_FACTORS
 
 
 def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
     """翌年 wOBA をターゲットとした学習データを構築"""
+    pf = _get_park_factors()
     records = []
     seasons = sorted(df["season"].unique())
     for year in seasons[3:]:  # 過去3年分の特徴量が必要
@@ -177,6 +261,7 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
         for _, row in targets.iterrows():
             player = row["player"]
             feats = {}
+            teams_by_lag = {}
             # 過去 3 年の特徴量（y1=直前, y2=2年前, y3=3年前）
             for lag in range(1, 4):
                 prev = df[(df["player"] == player) & (df["season"] == year - lag)]
@@ -187,8 +272,16 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
                 else:
                     for f in BATTER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
+                    teams_by_lag[lag] = str(prev.iloc[0].get("Team", ""))
 
             _bat_delta_features(feats)
+
+            # v7: team_changed（y1 → y2 でチーム変更）
+            t1, t2 = teams_by_lag.get(1, ""), teams_by_lag.get(2, "")
+            feats["team_changed"] = int(t1 != t2 and t1 != "" and t2 != "")
+
+            # v7: park_factor（直前シーズンのチームの球場補正）
+            feats["park_factor"] = pf.get((t1, year - 1), np.nan) if t1 else np.nan
 
             # Marcel ベースライン
             feats["marcel_woba"] = marcel_woba(df, player, year) or np.nan
@@ -203,6 +296,7 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
 
 def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
     """翌年 xFIP をターゲットとした学習データを構築"""
+    pf = _get_park_factors()
     records = []
     seasons = sorted(df["season"].unique())
     for year in seasons[3:]:
@@ -210,6 +304,7 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
         for _, row in targets.iterrows():
             player = row["player"]
             feats = {}
+            teams_by_lag = {}
             for lag in range(1, 4):
                 prev = df[(df["player"] == player) & (df["season"] == year - lag)]
                 suffix = f"_y{lag}"
@@ -219,8 +314,14 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
                 else:
                     for f in PITCHER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
+                    teams_by_lag[lag] = str(prev.iloc[0].get("Team", ""))
 
             _pit_delta_features(feats)
+
+            # v7: team_changed / park_factor
+            t1, t2 = teams_by_lag.get(1, ""), teams_by_lag.get(2, "")
+            feats["team_changed"] = int(t1 != t2 and t1 != "" and t2 != "")
+            feats["park_factor"] = pf.get((t1, year - 1), np.nan) if t1 else np.nan
 
             feats["marcel_xfip"] = marcel_xfip(df, player, year) or np.nan
             feats["target_xfip"] = row["xFIP"]
@@ -524,11 +625,13 @@ def _predict_next_season(model, full_df, latest_df, feat_cols,
                           target_col, pred_col, marcel_fn, avg_val,
                           delta_fn=None) -> pd.DataFrame:
     """最新シーズンの選手について翌年予測を生成"""
+    pf = _get_park_factors()
     next_year = int(latest_df["season"].max()) + 1
     records = []
     for _, row in latest_df.iterrows():
         player = row["player"]
         feats = {}
+        teams_by_lag = {}
         for lag in range(1, 4):
             y = next_year - 1 - lag
             prev = full_df[(full_df["player"] == player) & (full_df["season"] == y)]
@@ -542,13 +645,23 @@ def _predict_next_season(model, full_df, latest_df, feat_cols,
                         feats[f] = prev.iloc[0].get(base, np.nan)
                     elif f.endswith(suffix):
                         feats[f] = np.nan
+                teams_by_lag[1] = str(row.get("Team", ""))
+                if len(prev) > 0:
+                    teams_by_lag[2] = str(prev.iloc[0].get("Team", ""))
             else:
                 for f in [c for c in feat_cols if c.endswith(suffix)]:
                     base = f.replace(suffix, "")
                     feats[f] = prev.iloc[0].get(base, np.nan) if len(prev) > 0 else np.nan
+                if len(prev) > 0:
+                    teams_by_lag[lag] = str(prev.iloc[0].get("Team", ""))
 
         if delta_fn is not None:
             delta_fn(feats)
+
+        # v7: team_changed / park_factor
+        t1, t2 = teams_by_lag.get(1, ""), teams_by_lag.get(2, "")
+        feats["team_changed"] = int(t1 != t2 and t1 != "" and t2 != "")
+        feats["park_factor"] = pf.get((t1, next_year - 1), np.nan) if t1 else np.nan
 
         marcel_val = (marcel_fn(full_df, player, next_year) or avg_val)
         feats["marcel_" + target_col.lower().replace("/", "")] = marcel_val
