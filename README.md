@@ -116,15 +116,15 @@ CV results (0.0294 / 0.533) and holdout results (0.0295 / 0.487) are consistent 
 - **CI**: MC サンプリング N(delta_hat, σ) × 5000 → 10th/90th パーセンタイル = 80% CI
 - **Recency Decay**: 0.85/年で近年サンプルを重み付け
 
-### 特徴量（打者: 31個 / 投手: 28個）
+### 特徴量（打者: 38個 / 投手: 35個）
 | カテゴリ | 打者 | 投手 |
 |---|---|---|
 | Statcast | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/avg_hit_angle/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/avg_hit_angle/ev95percent |
-| FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G/maxEV | K-BB%/CSW%/SwStr%/G/IP |
-| FanGraphs (2020+) | — | Stuff+/Location+/Pitching+ |
-| Engineered | age_from_peak/age_sq/pa_rate/xwoba_luck/park_factor/team_changed/g_change_rate | age_from_peak/age_sq/ip_rate/park_factor/team_changed/g_change_rate |
-| **Lag delta (v6)** | **wOBA_delta_1/xwOBA_delta_1/K_pct_delta_1/BB_pct_delta_1/brl_delta_1** | **xFIP_delta_1/K_pct_delta_1/BB_pct_delta_1/KBB_delta_1** |
-| **Interaction (v6)** | **age_x_luck**（Age × xwOBA-wOBA乖離） | **age_x_kbb**（Age × K-BB%） |
+| FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G | K-BB%/CSW%/SwStr%/G/IP |
+| Lag delta (v6) | wOBA_delta_1/xwOBA_delta_1/K_pct_delta_1/BB_pct_delta_1/brl_delta_1 | xFIP_delta_1/K_pct_delta_1/BB_pct_delta_1/KBB_delta_1 |
+| **Lag delta (v7)** | **wOBA_delta_2**（2年トレンド） | **xFIP_delta_2**（2年トレンド） |
+| Interaction (v6) | age_x_luck（Age × xwOBA-wOBA乖離） | age_x_kbb（Age × K-BB%） |
+| **Engineered (v7)** | **age_from_peak/age_sq/pa_rate/xwoba_luck/park_factor/team_changed** | **age_from_peak/age_sq/ip_rate/fip_era_gap/park_factor/team_changed** |
 | Stacking | lgb_delta | lgb_delta |
 
 ---
