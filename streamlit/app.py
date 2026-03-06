@@ -84,13 +84,18 @@ def page_batters():
         return
 
     has_bayes = "bayes_woba" in df.columns
+    has_ensemble = "ensemble_woba" in df.columns
 
     # ソート
     sort_opts = ["ML予測 (pred_woba)", "Marcel予測"]
     if has_bayes:
         sort_opts.insert(1, "Bayes予測")
+    if has_ensemble:
+        sort_opts.insert(1, "アンサンブル予測")
     sort_col = st.radio("並び替え", sort_opts, horizontal=True)
-    if "Bayes" in sort_col:
+    if "アンサンブル" in sort_col:
+        col = "ensemble_woba"
+    elif "Bayes" in sort_col:
         col = "bayes_woba"
     elif "ML" in sort_col:
         col = "pred_woba"
@@ -104,6 +109,9 @@ def page_batters():
     if has_bayes:
         base_cols += ["bayes_woba", "ci_lo80", "ci_hi80"]
         base_names += ["Bayes予測", "CI下限(80%)", "CI上限(80%)"]
+    if has_ensemble:
+        base_cols += ["ensemble_woba"]
+        base_names += ["アンサンブル予測"]
     display = df_show[base_cols].copy()
     display.columns = base_names
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(3)
@@ -201,12 +209,17 @@ def page_pitchers():
         return
 
     has_bayes = "bayes_xfip" in df.columns
+    has_ensemble = "ensemble_xfip" in df.columns
 
     sort_opts = ["ML予測 (pred_xfip)", "Marcel予測"]
     if has_bayes:
         sort_opts.insert(1, "Bayes予測")
+    if has_ensemble:
+        sort_opts.insert(1, "アンサンブル予測")
     sort_col = st.radio("並び替え", sort_opts, horizontal=True)
-    if "Bayes" in sort_col:
+    if "アンサンブル" in sort_col:
+        col = "ensemble_xfip"
+    elif "Bayes" in sort_col:
         col = "bayes_xfip"
     elif "ML" in sort_col:
         col = "pred_xfip"
@@ -219,6 +232,9 @@ def page_pitchers():
     if has_bayes:
         base_cols += ["bayes_xfip", "ci_lo80", "ci_hi80"]
         base_names += ["Bayes予測", "CI下限(80%)", "CI上限(80%)"]
+    if has_ensemble:
+        base_cols += ["ensemble_xfip"]
+        base_names += ["アンサンブル予測"]
     display = df_show[base_cols].copy()
     display.columns = base_names
     display["差 (ML-Marcel)"] = (display["ML予測"] - display["Marcel予測"]).round(2)
@@ -325,15 +341,20 @@ def page_spring():
             st.warning("予測データがありません。")
         else:
             spring = pd.read_csv(bat_spring_path)
-            merged = spring.merge(
-                bat_pred[["player", "pred_woba", "marcel_woba"]],
-                on="player", how="inner"
-            )
+            bat_merge_cols = ["player", "pred_woba", "marcel_woba"]
+            if "ensemble_woba" in bat_pred.columns:
+                bat_merge_cols.append("ensemble_woba")
+            merged = spring.merge(bat_pred[bat_merge_cols], on="player", how="inner")
             if merged.empty:
                 st.info(f"予測データと一致する選手が見つかりません（オープン戦出場: {len(spring)} 人）")
             else:
-                display = merged[["player", "Team", "PA", "wOBA", "pred_woba", "marcel_woba"]].copy()
-                display.columns = ["選手名", "チーム", "打席数", "実績wOBA", "ML予測", "Marcel予測"]
+                disp_cols = ["player", "Team", "PA", "wOBA", "pred_woba", "marcel_woba"]
+                disp_names = ["選手名", "チーム", "打席数", "実績wOBA", "ML予測", "Marcel予測"]
+                if "ensemble_woba" in merged.columns:
+                    disp_cols.append("ensemble_woba")
+                    disp_names.append("アンサンブル予測")
+                display = merged[disp_cols].copy()
+                display.columns = disp_names
                 display["ML誤差"] = (display["実績wOBA"] - display["ML予測"]).round(3)
                 display["Marcel誤差"] = (display["実績wOBA"] - display["Marcel予測"]).round(3)
                 st.dataframe(display.sort_values("打席数", ascending=False),
@@ -353,15 +374,20 @@ def page_spring():
             st.warning("予測データがありません。")
         else:
             spring = pd.read_csv(pit_spring_path)
-            merged = spring.merge(
-                pit_pred[["player", "pred_xfip", "marcel_xfip"]],
-                on="player", how="inner"
-            )
+            pit_merge_cols = ["player", "pred_xfip", "marcel_xfip"]
+            if "ensemble_xfip" in pit_pred.columns:
+                pit_merge_cols.append("ensemble_xfip")
+            merged = spring.merge(pit_pred[pit_merge_cols], on="player", how="inner")
             if merged.empty:
                 st.info(f"予測データと一致する選手が見つかりません（オープン戦出場: {len(spring)} 人）")
             else:
-                display = merged[["player", "Team", "IP", "xFIP", "pred_xfip", "marcel_xfip"]].copy()
-                display.columns = ["選手名", "チーム", "投球回", "実績xFIP", "ML予測", "Marcel予測"]
+                disp_cols = ["player", "Team", "IP", "xFIP", "pred_xfip", "marcel_xfip"]
+                disp_names = ["選手名", "チーム", "投球回", "実績xFIP", "ML予測", "Marcel予測"]
+                if "ensemble_xfip" in merged.columns:
+                    disp_cols.append("ensemble_xfip")
+                    disp_names.append("アンサンブル予測")
+                display = merged[disp_cols].copy()
+                display.columns = disp_names
                 display["ML誤差"] = (display["実績xFIP"] - display["ML予測"]).round(3)
                 display["Marcel誤差"] = (display["実績xFIP"] - display["Marcel予測"]).round(3)
                 st.dataframe(display.sort_values("投球回", ascending=False),
