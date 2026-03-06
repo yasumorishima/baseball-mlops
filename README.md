@@ -16,8 +16,8 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 
 | | Marcel 法 | LightGBM | Bayes (ElasticNet) | Ensemble |
 |---|---|---|---|---|
-| 打者 wOBA MAE | 0.0326 | 0.0295 | **0.0286** | 逆MAE重み付き |
-| 投手 xFIP MAE | 0.5576 | 0.5321 | **0.4833** | 逆MAE重み付き |
+| 打者 wOBA MAE | 0.0326 | 0.0294 | **0.0287** | 逆MAE重み付き |
+| 投手 xFIP MAE | 0.5576 | 0.5317 | **0.4830** | 逆MAE重み付き |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
 ※ LightGBM は Optuna 1000 トライアル最適化済み（TPESampler + MedianPruner）
@@ -31,12 +31,12 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 | Year | Batter wOBA | | Pitcher xFIP | |
 |------|-------------|---|-------------|---|
 | | ML MAE | Marcel MAE | ML MAE | Marcel MAE |
-| 2020 | 0.0360 | 0.0371 (+3.0%) | 0.589 | 0.618 (+4.6%) |
-| 2021 | 0.0293 | 0.0317 (+7.6%) | 0.542 | 0.553 (+2.0%) |
-| 2022 | 0.0294 | 0.0330 (+10.9%) | 0.580 | 0.569 (-1.9%) |
-| 2023 | 0.0278 | 0.0303 (+8.4%) | 0.536 | 0.559 (+4.0%) |
-| 2024 | 0.0281 | 0.0333 (+15.8%) | 0.507 | 0.522 (+2.8%) |
-| **2025** | **0.0295** | **0.0331 (+10.9%)** | **0.487** | **0.504 (+3.4%)** |
+| 2020 | 0.0359 | 0.0371 (+3.2%) | 0.595 | 0.618 (+3.7%) |
+| 2021 | 0.0293 | 0.0317 (+7.6%) | 0.542 | 0.553 (+1.9%) |
+| 2022 | 0.0296 | 0.0330 (+10.3%) | 0.578 | 0.569 (-1.5%) |
+| 2023 | 0.0277 | 0.0303 (+8.7%) | 0.535 | 0.559 (+4.3%) |
+| 2024 | 0.0280 | 0.0333 (+16.0%) | 0.509 | 0.522 (+2.5%) |
+| **2025** | **0.0291** | **0.0331 (+12.1%)** | **0.484** | **0.504 (+4.0%)** |
 
 **Batter**: ML wins all 5 CV years + 2025 holdout. Post-2023 improvement accelerating.
 **Pitcher**: ML wins 4/5 CV years + 2025 holdout. 2022 loss likely due to limited training data (COVID 2020-2021 only).
@@ -50,10 +50,10 @@ all pre-2025 data and evaluated once on 2025. This eliminates any indirect data 
 
 | | ML MAE | Marcel MAE | ML wins | Improvement |
 |---|---|---|---|---|
-| Batter wOBA | **0.0295** | 0.0331 | Yes | +10.9% |
-| Pitcher xFIP | **0.4865** | 0.5038 | Yes | +3.4% |
+| Batter wOBA | **0.0291** | 0.0331 | Yes | +12.1% |
+| Pitcher xFIP | **0.4837** | 0.5038 | Yes | +4.0% |
 
-CV results (0.0294 / 0.533) and holdout results (0.0295 / 0.487) are consistent — no overfitting detected.
+CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent — no overfitting detected.
 
 ---
 
