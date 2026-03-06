@@ -16,8 +16,8 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 
 | | Marcel 法 | LightGBM | Bayes (ElasticNet) | Ensemble |
 |---|---|---|---|---|
-| 打者 wOBA MAE | 0.0326 | 0.0294 | **0.0286** | 逆MAE重み付き |
-| 投手 xFIP MAE | 0.5576 | 0.5331 | **0.4815** | 逆MAE重み付き |
+| 打者 wOBA MAE | 0.0326 | 0.0295 | **0.0286** | 逆MAE重み付き |
+| 投手 xFIP MAE | 0.5576 | 0.5321 | **0.4833** | 逆MAE重み付き |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
 ※ LightGBM は Optuna 1000 トライアル最適化済み（TPESampler + MedianPruner）
@@ -31,22 +31,29 @@ MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等
 | Year | Batter wOBA | | Pitcher xFIP | |
 |------|-------------|---|-------------|---|
 | | ML MAE | Marcel MAE | ML MAE | Marcel MAE |
-| 2020 | 0.0361 | 0.0371 (+2.8%) | 0.598 | 0.618 (+3.2%) |
-| 2021 | 0.0292 | 0.0317 (+7.9%) | 0.541 | 0.553 (+2.1%) |
-| 2022 | 0.0294 | 0.0330 (+11.1%) | 0.579 | 0.569 (-1.8%) |
-| 2023 | 0.0280 | 0.0303 (+7.6%) | 0.535 | 0.559 (+4.3%) |
-| 2024 | 0.0279 | 0.0333 (+16.2%) | 0.508 | 0.522 (+2.5%) |
+| 2020 | 0.0360 | 0.0371 (+3.0%) | 0.589 | 0.618 (+4.6%) |
+| 2021 | 0.0293 | 0.0317 (+7.6%) | 0.542 | 0.553 (+2.0%) |
+| 2022 | 0.0294 | 0.0330 (+10.9%) | 0.580 | 0.569 (-1.9%) |
+| 2023 | 0.0278 | 0.0303 (+8.4%) | 0.536 | 0.559 (+4.0%) |
+| 2024 | 0.0281 | 0.0333 (+15.8%) | 0.507 | 0.522 (+2.8%) |
+| **2025** | **0.0295** | **0.0331 (+10.9%)** | **0.487** | **0.504 (+3.4%)** |
 
-**Batter**: ML wins all 5 CV years. Post-2023 improvement accelerating (7.6% -> 12.6%).
-**Pitcher**: ML wins 4/5 CV years. 2022 loss likely due to limited training data (COVID 2020-2021 only).
+**Batter**: ML wins all 5 CV years + 2025 holdout. Post-2023 improvement accelerating.
+**Pitcher**: ML wins 4/5 CV years + 2025 holdout. 2022 loss likely due to limited training data (COVID 2020-2021 only).
+**2025 holdout**: True holdout (never seen by Optuna/CV). Both batter and pitcher ML wins — no overfitting.
 
-### 2025 Strict Holdout (in progress)
+### 2025 Strict Holdout
 
-2025 is evaluated as a **true holdout** -- never seen during Optuna hyperparameter tuning or CV.
+2025 is evaluated as a **true holdout** — never seen during Optuna hyperparameter tuning or CV.
 Optuna 1000 trials are tuned exclusively on 2020-2024 data, then the final model is trained on
 all pre-2025 data and evaluated once on 2025. This eliminates any indirect data leakage concern.
 
-Results will be updated here once the CI run completes.
+| | ML MAE | Marcel MAE | ML wins | Improvement |
+|---|---|---|---|---|
+| Batter wOBA | **0.0295** | 0.0331 | Yes | +10.9% |
+| Pitcher xFIP | **0.4865** | 0.5038 | Yes | +3.4% |
+
+CV results (0.0294 / 0.533) and holdout results (0.0295 / 0.487) are consistent — no overfitting detected.
 
 ---
 

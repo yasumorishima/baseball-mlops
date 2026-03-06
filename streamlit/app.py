@@ -463,6 +463,22 @@ def page_backtest():
                                   delta_color="normal")
                         st.caption(f"{info['n_players_total']}選手, {info['years']}")
 
+            # 2025 True Holdout
+            holdout = data.get("holdout", {})
+            if holdout:
+                st.subheader(f"{holdout['year']} True Holdout")
+                st.caption("Optuna + CV では一切使用していない完全未知データでの評価")
+                h1, h2, h3 = st.columns(3)
+                h1.metric(f"ML MAE ({metric})", f"{holdout['ml_mae']:.4f}")
+                h2.metric(f"Marcel MAE ({metric})", f"{holdout['marcel_mae']:.4f}",
+                          delta=f"{holdout['improvement_pct']:+.1f}%",
+                          delta_color="normal")
+                h3.metric("選手数", holdout["n_players"])
+                if holdout.get("ml_wins"):
+                    st.success(f"ML は 2025 holdout でも Marcel に勝利（{holdout['improvement_pct']:.1f}% 改善）")
+                else:
+                    st.warning("Marcel が 2025 holdout で ML に勝利")
+
             # 大外れ選手
             outlier_path = _BASE / "predictions" / "backtest" / f"outliers_{kind}.csv"
             if outlier_path.exists():
