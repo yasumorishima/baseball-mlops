@@ -10,6 +10,10 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 | 本番 | https://baseball-mlops.streamlit.app/ |
 | 開発（Spring Training 検証） | https://baseball-mlops-dev.streamlit.app/ |
 
+## 解説記事
+
+- [Statcastデータで選手成績予測の精度は上がるか — Marcel法との比較](https://zenn.dev/shogaku/articles/baseball-mlops-statcast-vs-marcel)（Zenn）
+
 ---
 
 ## 精度（時系列 CV バックテスト）
