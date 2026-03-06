@@ -14,9 +14,11 @@ import numpy as np
 import pandas as pd
 import joblib
 import lightgbm as lgb
+import optuna
 import wandb
-from sklearn.model_selection import KFold
 from sklearn.metrics import mean_absolute_error
+
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
@@ -104,8 +106,10 @@ def marcel_xfip(df: pd.DataFrame, player: str, year: int) -> float | None:
 
 # FanGraphs カラム名 (大文字) + Statcast カラム名 (小文字 / snake_case)
 BATTER_FEATURES = [
-    # FanGraphs
+    # FanGraphs (既存)
     "wOBA", "xwOBA", "K%", "BB%", "ISO", "BABIP", "OBP", "SLG",
+    # FanGraphs (追加 v5)
+    "SwStr%", "HardHit%", "Contact%", "O-Swing%", "G",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba",
     # Statcast exit velo / barrels
@@ -118,8 +122,10 @@ BATTER_FEATURES = [
 ]
 
 PITCHER_FEATURES = [
-    # FanGraphs
+    # FanGraphs (既存)
     "xFIP", "FIP", "ERA", "K%", "BB%", "HR/9", "WHIP", "BABIP", "LOB%",
+    # FanGraphs (追加 v5)
+    "SwStr%", "K-BB%", "CSW%", "G",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba", "est_era",
     # Statcast exit velo (被打球)
@@ -127,6 +133,39 @@ PITCHER_FEATURES = [
     # 基本情報
     "Age", "IP",
 ]
+
+
+def _bat_delta_features(feats: dict) -> None:
+    """打者ラグ差分・交互作用項をインプレースで追加"""
+    def _d(a, b):
+        v = feats.get(a, np.nan), feats.get(b, np.nan)
+        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+
+    feats["wOBA_delta_1"]   = _d("wOBA_y1",       "wOBA_y2")
+    feats["xwOBA_delta_1"]  = _d("xwOBA_y1",      "xwOBA_y2")
+    feats["K_pct_delta_1"]  = _d("K%_y1",         "K%_y2")
+    feats["BB_pct_delta_1"] = _d("BB%_y1",        "BB%_y2")
+    feats["brl_delta_1"]    = _d("brl_percent_y1", "brl_percent_y2")
+    xwoba = feats.get("xwOBA_y1", np.nan)
+    woba  = feats.get("wOBA_y1",  np.nan)
+    age   = feats.get("Age_y1",   np.nan)
+    luck  = (xwoba - woba) if not (np.isnan(xwoba) or np.isnan(woba)) else np.nan
+    feats["age_x_luck"] = age * luck if not (np.isnan(age) or np.isnan(luck)) else np.nan
+
+
+def _pit_delta_features(feats: dict) -> None:
+    """投手ラグ差分・交互作用項をインプレースで追加"""
+    def _d(a, b):
+        v = feats.get(a, np.nan), feats.get(b, np.nan)
+        return v[0] - v[1] if not (np.isnan(v[0]) or np.isnan(v[1])) else np.nan
+
+    feats["xFIP_delta_1"]   = _d("xFIP_y1",   "xFIP_y2")
+    feats["K_pct_delta_1"]  = _d("K%_y1",     "K%_y2")
+    feats["BB_pct_delta_1"] = _d("BB%_y1",    "BB%_y2")
+    feats["KBB_delta_1"]    = _d("K-BB%_y1",  "K-BB%_y2")
+    kbb = feats.get("K-BB%_y1", np.nan)
+    age = feats.get("Age_y1",   np.nan)
+    feats["age_x_kbb"] = age * kbb if not (np.isnan(age) or np.isnan(kbb)) else np.nan
 
 
 def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
@@ -148,6 +187,8 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
                 else:
                     for f in BATTER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
+
+            _bat_delta_features(feats)
 
             # Marcel ベースライン
             feats["marcel_woba"] = marcel_woba(df, player, year) or np.nan
@@ -179,6 +220,8 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
                     for f in PITCHER_FEATURES:
                         feats[f + suffix] = prev.iloc[0].get(f, np.nan)
 
+            _pit_delta_features(feats)
+
             feats["marcel_xfip"] = marcel_xfip(df, player, year) or np.nan
             feats["target_xfip"] = row["xFIP"]
             feats["player"] = player
@@ -192,6 +235,23 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
 # 学習
 # ---------------------------------------------------------------------------
 
+def _time_cv_splits(seasons: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    """年単位 expanding window splits（最低2年の学習データを確保）。
+
+    fold i: train = seasons < val_year, val = seasons == val_year
+    unique_years の先頭2年はtraining onlyに使い、3年目以降をval年とする。
+    """
+    unique_years = sorted(np.unique(seasons))
+    splits = []
+    for val_year in unique_years[2:]:
+        train_idx = np.where(seasons < val_year)[0]
+        val_idx   = np.where(seasons == val_year)[0]
+        if len(train_idx) > 0 and len(val_idx) > 0:
+            splits.append((train_idx, val_idx))
+    return splits
+
+
+# デフォルトパラメータ（Optuna 未実行時のフォールバック）
 LGB_PARAMS = {
     "objective": "regression",
     "metric": "mae",
@@ -202,31 +262,100 @@ LGB_PARAMS = {
     "bagging_fraction": 0.8,
     "bagging_freq": 5,
     "verbosity": -1,
-    "n_estimators": 300,
+    "n_estimators": 500,
 }
 
+# Optuna で探索する最大木数（early_stopping で自動打ち切り）
+_MAX_ESTIMATORS = 1000
+_EARLY_STOPPING = 50
 
-def train_model(X: pd.DataFrame, y: pd.Series, params: dict) -> tuple:
-    """5-fold CV で LightGBM を学習、MAE と最終モデルを返す"""
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    oof = np.zeros(len(y))
+
+def _cv_mae(params: dict, X: pd.DataFrame, y: pd.Series,
+            seasons: np.ndarray) -> float:
+    """時系列 CV で OOF MAE を計算（Optuna objective から呼ぶ）"""
+    splits = _time_cv_splits(seasons)
+    oof = np.full(len(y), np.nan)
+    for tr_idx, va_idx in splits:
+        model = lgb.LGBMRegressor(**params)
+        model.fit(
+            X.iloc[tr_idx], y.iloc[tr_idx],
+            eval_set=[(X.iloc[va_idx], y.iloc[va_idx])],
+            callbacks=[lgb.early_stopping(_EARLY_STOPPING, verbose=False),
+                       lgb.log_evaluation(-1)],
+        )
+        oof[va_idx] = model.predict(X.iloc[va_idx])
+    valid = ~np.isnan(oof)
+    return float(mean_absolute_error(y[valid], oof[valid]))
+
+
+def tune_hyperparams(X: pd.DataFrame, y: pd.Series, seasons: np.ndarray,
+                     n_trials: int = 100) -> dict:
+    """Optuna で LightGBM ハイパーパラメータを最適化し、最良パラメータを返す。
+
+    MedianPruner を使って見込みのないトライアルを早期打ち切りすることで
+    100 トライアルで 150〜200 相当の探索効果を得る。
+    """
+    def objective(trial: optuna.Trial) -> float:
+        params = {
+            "objective":          "regression",
+            "metric":             "mae",
+            "verbosity":          -1,
+            "n_estimators":       _MAX_ESTIMATORS,
+            "learning_rate":      trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
+            "num_leaves":         trial.suggest_int("num_leaves", 15, 127),
+            "min_child_samples":  trial.suggest_int("min_child_samples", 10, 50),
+            "feature_fraction":   trial.suggest_float("feature_fraction", 0.5, 1.0),
+            "bagging_fraction":   trial.suggest_float("bagging_fraction", 0.5, 1.0),
+            "bagging_freq":       5,
+            "reg_alpha":          trial.suggest_float("reg_alpha", 0.0, 5.0),
+            "reg_lambda":         trial.suggest_float("reg_lambda", 0.0, 5.0),
+        }
+        return _cv_mae(params, X, y, seasons)
+
+    sampler = optuna.samplers.TPESampler(n_startup_trials=20, seed=42)
+    pruner  = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=5)
+    study   = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+
+    best = study.best_params
+    best.update({
+        "objective":   "regression",
+        "metric":      "mae",
+        "verbosity":   -1,
+        "n_estimators": _MAX_ESTIMATORS,
+        "bagging_freq": 5,
+    })
+    return best
+
+
+def train_model(X: pd.DataFrame, y: pd.Series, params: dict,
+                seasons: np.ndarray | None = None) -> tuple:
+    """時系列 expanding-window CV で LightGBM を学習し MAE・最終モデル・OOF を返す。"""
+    if seasons is not None:
+        splits = _time_cv_splits(seasons)
+    else:
+        from sklearn.model_selection import KFold
+        splits = list(KFold(n_splits=5, shuffle=True, random_state=42).split(X))
+
+    oof = np.full(len(y), np.nan)
     models = []
 
-    for fold, (tr_idx, va_idx) in enumerate(kf.split(X)):
+    for tr_idx, va_idx in splits:
         X_tr, X_va = X.iloc[tr_idx], X.iloc[va_idx]
         y_tr, y_va = y.iloc[tr_idx], y.iloc[va_idx]
         model = lgb.LGBMRegressor(**params)
         model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)],
-                  callbacks=[lgb.early_stopping(30, verbose=False),
+                  callbacks=[lgb.early_stopping(_EARLY_STOPPING, verbose=False),
                               lgb.log_evaluation(-1)])
         oof[va_idx] = model.predict(X_va)
         models.append(model)
 
-    mae = mean_absolute_error(y, oof)
+    valid = ~np.isnan(oof)
+    mae = mean_absolute_error(y[valid], oof[valid])
     # 全データで再学習（最終モデル）
     final = lgb.LGBMRegressor(**params)
     final.fit(X, y)
-    return final, mae, models
+    return final, mae, models, oof
 
 
 def save_to_wandb(model, mae: float, target: str, feature_names: list, config: dict):
@@ -282,6 +411,9 @@ def save_to_wandb(model, mae: float, target: str, feature_names: list, config: d
     return artifact
 
 
+OPTUNA_TRIALS = 1000
+
+
 def run_training():
     """打者・投手モデルを学習して W&B に記録"""
     # 打者
@@ -294,16 +426,36 @@ def run_training():
                      if c not in ("player", "season", "target_woba")]
     X_bat = train_bat[feat_cols_bat].apply(pd.to_numeric, errors="coerce")
     y_bat = train_bat["target_woba"]
+    seasons_bat = train_bat["season"].values
 
-    model_bat, mae_bat, _ = train_model(X_bat, y_bat, LGB_PARAMS)
+    print(f"  Optuna tuning ({OPTUNA_TRIALS} trials) ...")
+    best_params_bat = tune_hyperparams(X_bat, y_bat, seasons_bat, n_trials=OPTUNA_TRIALS)
+    print(f"  best: lr={best_params_bat['learning_rate']:.4f}, "
+          f"leaves={best_params_bat['num_leaves']}, "
+          f"min_child={best_params_bat['min_child_samples']}")
+
+    model_bat, mae_bat, _, oof_bat = train_model(
+        X_bat, y_bat, best_params_bat, seasons=seasons_bat
+    )
     print(f"  ML  MAE wOBA: {mae_bat:.4f}")
 
     # Marcel ベースライン MAE
     marcel_mae_bat = mean_absolute_error(y_bat, train_bat["marcel_woba"].fillna(MLB_AVG_WOBA))
     print(f"  Marcel MAE wOBA: {marcel_mae_bat:.4f}")
 
+    # OOF 保存（train_bayes.py のスタッキング用）
+    # time-series CV では先頭2年分は val に入らないため NaN → 除外
+    oof_mask_bat = ~np.isnan(oof_bat)
+    pd.DataFrame({
+        "player": train_bat["player"].values[oof_mask_bat],
+        "season": train_bat["season"].values[oof_mask_bat],
+        "lgb_woba_oof": oof_bat[oof_mask_bat],
+    }).to_csv(RAW_DIR / "lgb_oof_batter.csv", index=False)
+
     save_to_wandb(model_bat, mae_bat, "woba", feat_cols_bat,
-                  {"marcel_mae": marcel_mae_bat, "n_samples": len(X_bat)})
+                  {"marcel_mae": marcel_mae_bat, "n_samples": len(X_bat),
+                   **{f"bat_{k}": v for k, v in best_params_bat.items()
+                      if k in ("learning_rate", "num_leaves", "min_child_samples")}})
 
     # 投手
     print("=== Pitcher (xFIP) ===")
@@ -315,24 +467,45 @@ def run_training():
                      if c not in ("player", "season", "target_xfip")]
     X_pit = train_pit[feat_cols_pit].apply(pd.to_numeric, errors="coerce")
     y_pit = train_pit["target_xfip"]
+    seasons_pit = train_pit["season"].values
 
-    model_pit, mae_pit, _ = train_model(X_pit, y_pit, LGB_PARAMS)
+    print(f"  Optuna tuning ({OPTUNA_TRIALS} trials) ...")
+    best_params_pit = tune_hyperparams(X_pit, y_pit, seasons_pit, n_trials=OPTUNA_TRIALS)
+    print(f"  best: lr={best_params_pit['learning_rate']:.4f}, "
+          f"leaves={best_params_pit['num_leaves']}, "
+          f"min_child={best_params_pit['min_child_samples']}")
+
+    model_pit, mae_pit, _, oof_pit = train_model(
+        X_pit, y_pit, best_params_pit, seasons=seasons_pit
+    )
     print(f"  ML  MAE xFIP: {mae_pit:.4f}")
 
     marcel_mae_pit = mean_absolute_error(y_pit, train_pit["marcel_xfip"].fillna(MLB_AVG_XFIP))
     print(f"  Marcel MAE xFIP: {marcel_mae_pit:.4f}")
 
+    # OOF 保存（time-series CV: 先頭2年分は NaN → 除外）
+    oof_mask_pit = ~np.isnan(oof_pit)
+    pd.DataFrame({
+        "player": train_pit["player"].values[oof_mask_pit],
+        "season": train_pit["season"].values[oof_mask_pit],
+        "lgb_xfip_oof": oof_pit[oof_mask_pit],
+    }).to_csv(RAW_DIR / "lgb_oof_pitcher.csv", index=False)
+
     save_to_wandb(model_pit, mae_pit, "xfip", feat_cols_pit,
-                  {"marcel_mae": marcel_mae_pit, "n_samples": len(X_pit)})
+                  {"marcel_mae": marcel_mae_pit, "n_samples": len(X_pit),
+                   **{f"pit_{k}": v for k, v in best_params_pit.items()
+                      if k in ("learning_rate", "num_leaves", "min_child_samples")}})
 
     # 予測結果を保存
     bat_df_latest = bat_df[bat_df["season"] == bat_df["season"].max()]
     pit_df_latest = pit_df[pit_df["season"] == pit_df["season"].max()]
 
     bat_preds = _predict_next_season(model_bat, bat_df, bat_df_latest, feat_cols_bat,
-                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA)
+                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA,
+                                     delta_fn=_bat_delta_features)
     pit_preds = _predict_next_season(model_pit, pit_df, pit_df_latest, feat_cols_pit,
-                                     "xFIP", "pred_xfip", marcel_xfip, MLB_AVG_XFIP)
+                                     "xFIP", "pred_xfip", marcel_xfip, MLB_AVG_XFIP,
+                                     delta_fn=_pit_delta_features)
 
     bat_preds.to_csv(PROJ_DIR / "batter_predictions.csv", index=False)
     pit_preds.to_csv(PROJ_DIR / "pitcher_predictions.csv", index=False)
@@ -341,9 +514,15 @@ def run_training():
     pit_preds.to_csv(PRED_DIR / "pitcher_predictions.csv", index=False)
     print(f"Predictions saved: {len(bat_preds)} batters, {len(pit_preds)} pitchers")
 
+    # アンサンブル用に MAE を保存
+    metrics = {"lgb_mae_woba": round(mae_bat, 4), "lgb_mae_xfip": round(mae_pit, 4),
+               "marcel_mae_woba": round(marcel_mae_bat, 4), "marcel_mae_xfip": round(marcel_mae_pit, 4)}
+    (PRED_DIR / "model_metrics.json").write_text(json.dumps(metrics, indent=2))
+
 
 def _predict_next_season(model, full_df, latest_df, feat_cols,
-                          target_col, pred_col, marcel_fn, avg_val) -> pd.DataFrame:
+                          target_col, pred_col, marcel_fn, avg_val,
+                          delta_fn=None) -> pd.DataFrame:
     """最新シーズンの選手について翌年予測を生成"""
     next_year = int(latest_df["season"].max()) + 1
     records = []
@@ -367,6 +546,9 @@ def _predict_next_season(model, full_df, latest_df, feat_cols,
                 for f in [c for c in feat_cols if c.endswith(suffix)]:
                     base = f.replace(suffix, "")
                     feats[f] = prev.iloc[0].get(base, np.nan) if len(prev) > 0 else np.nan
+
+        if delta_fn is not None:
+            delta_fn(feats)
 
         marcel_val = (marcel_fn(full_df, player, next_year) or avg_val)
         feats["marcel_" + target_col.lower().replace("/", "")] = marcel_val

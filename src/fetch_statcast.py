@@ -21,7 +21,7 @@ DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 START_SEASON = 2015
-END_SEASON = 2024
+END_SEASON = 2025
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +209,18 @@ def build_pitcher_features() -> pd.DataFrame:
     return merged
 
 
+def fetch_park_factors():
+    from savant_extras import park_factors_range
+    df = park_factors_range(START_SEASON, END_SEASON)
+    out_path = DATA_DIR / "park_factors.csv"
+    df.to_csv(out_path, index=False)
+    print(f"Park factors: {len(df)} rows ({df['season'].min()}-{df['season'].max()}), saved to {out_path}")
+    return df
+
+
 if __name__ == "__main__":
     # 全データ取得（GitHub Actions で実行）
+    fetch_park_factors()
     fetch_batting_fangraphs()
     fetch_batting_exitvelo()
     fetch_batting_expected()
