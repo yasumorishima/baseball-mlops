@@ -13,6 +13,7 @@ Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで
 ## 解説記事
 
 - [Statcastデータで選手成績予測の精度は上がるか — Marcel法との比較](https://zenn.dev/shogaku/articles/baseball-mlops-statcast-vs-marcel)（Zenn）
+- [Can Statcast Data Improve MLB Player Performance Predictions?](https://dev.to/yasumorishima/can-statcast-data-improve-mlb-player-performance-predictions-beating-marcel-with-lightgbm-1lb5)（DEV.to）
 
 ---
 
