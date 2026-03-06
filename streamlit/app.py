@@ -401,6 +401,84 @@ def page_spring():
                 st.caption(f"※ オープン戦は参考値。サンプル数: {len(display)} 選手")
 
 
+def page_backtest():
+    st.header("Backtest: Year-by-Year Stability")
+
+    summary_path = _BASE / "predictions" / "backtest" / "backtest_summary.json"
+    if not summary_path.exists():
+        st.info("バックテスト未実行。GitHub Actions の Backtest Analysis を実行してください。")
+        return
+
+    summary = json.loads(summary_path.read_text())
+
+    tab_bat, tab_pit = st.tabs(["打者 wOBA", "投手 xFIP"])
+
+    for tab, kind, metric in [(tab_bat, "batter", "wOBA"), (tab_pit, "pitcher", "xFIP")]:
+        with tab:
+            data = summary[kind]
+            yearly = pd.DataFrame(data["yearly"])
+
+            # 全年度勝利かどうか
+            if data["ml_wins_all_years"]:
+                st.success(f"ML は全 {data['total_years']} 年度で Marcel に勝利")
+            else:
+                st.warning(f"ML は {data['ml_win_years']}/{data['total_years']} 年度で Marcel に勝利")
+
+            # 年度別 MAE 棒グラフ
+            st.subheader(f"年度別 MAE 比較 ({metric})")
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=yearly["year"], y=yearly["marcel_mae"],
+                name="Marcel", marker_color="#9e9e9e",
+            ))
+            fig.add_trace(go.Bar(
+                x=yearly["year"], y=yearly["ml_mae"],
+                name="ML (LightGBM)", marker_color="#1a73e8",
+            ))
+            fig.update_layout(
+                barmode="group",
+                xaxis_title="Year", yaxis_title="MAE",
+                xaxis=dict(dtick=1),
+                height=400,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 年度別テーブル
+            display = yearly.copy()
+            display.columns = ["年度", "選手数", "ML MAE", "Marcel MAE",
+                               "ML勝利", "改善率(%)"]
+            st.dataframe(display, use_container_width=True, hide_index=True)
+
+            # Pre/Post 2023
+            era = data.get("era_split", {})
+            if era:
+                st.subheader("2023年ルール変更 前後比較")
+                cols = st.columns(len(era))
+                for col, (label, info) in zip(cols, era.items()):
+                    period = "~2022" if "pre" in label else "2023~"
+                    with col:
+                        st.metric(f"{period} ML MAE", f"{info['ml_mae_weighted']:.4f}")
+                        st.metric(f"{period} Marcel MAE", f"{info['marcel_mae_weighted']:.4f}",
+                                  delta=f"{info['improvement_pct']:+.1f}%",
+                                  delta_color="normal")
+                        st.caption(f"{info['n_players_total']}選手, {info['years']}")
+
+            # 大外れ選手
+            outlier_path = _BASE / "predictions" / "backtest" / f"outliers_{kind}.csv"
+            if outlier_path.exists():
+                st.subheader("大外れ選手 TOP 20")
+                outliers = pd.read_csv(outlier_path).head(20)
+                disp_cols = ["player", "season", "actual", "ml_pred",
+                             "marcel_pred", "ml_error", "ml_worse_than_marcel"]
+                disp_names = ["選手名", "年度", "実績", "ML予測",
+                              "Marcel予測", "ML誤差", "MLがMarcelより悪い"]
+                st.dataframe(
+                    outliers[disp_cols].rename(columns=dict(zip(disp_cols, disp_names))),
+                    use_container_width=True, hide_index=True,
+                )
+                st.caption("ケガ・急激な覚醒・移籍など、データに含まれない要因で予測が外れた可能性あり")
+
+
 def page_about():
     st.header("このプロジェクトについて")
     st.markdown("""
@@ -448,7 +526,7 @@ st.divider()
 # メインエリアのナビ（サイドバーが閉じているスマホでも操作できる）
 page = st.radio(
     "ページを選択",
-    ["打者 wOBA 予測", "投手 xFIP 予測", "🌸 Spring Training 検証", "About"],
+    ["打者 wOBA 予測", "投手 xFIP 予測", "🌸 Spring Training 検証", "Backtest", "About"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -459,5 +537,7 @@ elif page == "投手 xFIP 予測":
     page_pitchers()
 elif page == "🌸 Spring Training 検証":
     page_spring()
+elif page == "Backtest":
+    page_backtest()
 else:
     page_about()
