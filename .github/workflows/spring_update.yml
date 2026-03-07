@@ -4,7 +4,11 @@ on:
   schedule:
     - cron: "0 14 * * *"   # 毎日 UTC 14:00 (JST 23:00)
   workflow_dispatch:
-
+    inputs:
+      memo:
+        description: 'この実行の意図'
+        required: false
+        type: string
 jobs:
   update:
     runs-on: ubuntu-latest
