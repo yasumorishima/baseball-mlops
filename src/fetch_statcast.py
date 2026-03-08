@@ -24,6 +24,22 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 START_SEASON = 2015
 END_SEASON = 2025
 
+MAX_RETRIES = 3
+RETRY_DELAY = 5
+
+
+def _fetch_with_retry(func, *args, **kwargs):
+    """Savant API呼び出しをリトライ付きで実行（不正CSV対策）"""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                print(f"    retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                raise
+
 
 # ---------------------------------------------------------------------------
 # 打者
@@ -34,10 +50,13 @@ def fetch_batting_fangraphs(start: int = START_SEASON, end: int = END_SEASON) ->
     print(f"FanGraphs batting {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.batting_stats(year, year, qual=50)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.batting_stats, year, year, qual=50)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  FG batting {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "fg_batting.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -49,10 +68,13 @@ def fetch_batting_exitvelo(start: int = START_SEASON, end: int = END_SEASON) -> 
     print(f"Statcast batter exit velo {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_batter_exitvelo_barrels(year, minBBE=50)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.statcast_batter_exitvelo_barrels, year, minBBE=50)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  exit velo {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_batter_exitvelo.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -64,10 +86,13 @@ def fetch_batting_expected(start: int = START_SEASON, end: int = END_SEASON) -> 
     print(f"Statcast batter expected stats {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_batter_expected_stats(year, minPA=50)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.statcast_batter_expected_stats, year, minPA=50)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  expected stats {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_batter_expected.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -101,10 +126,13 @@ def fetch_sprint_speed(start: int = START_SEASON, end: int = END_SEASON) -> pd.D
     print(f"Statcast sprint speed {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_sprint_speed(year)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.statcast_sprint_speed, year)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  sprint speed {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_sprint_speed.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -142,10 +170,13 @@ def fetch_pitching_fangraphs(start: int = START_SEASON, end: int = END_SEASON) -
     print(f"FanGraphs pitching {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.pitching_stats(year, year, qual=30)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.pitching_stats, year, year, qual=30)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  FG pitching {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "fg_pitching.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -157,10 +188,13 @@ def fetch_pitching_exitvelo(start: int = START_SEASON, end: int = END_SEASON) ->
     print(f"Statcast pitcher exit velo {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_pitcher_exitvelo_barrels(year, minBBE=50)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.statcast_pitcher_exitvelo_barrels, year, minBBE=50)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  pitcher exit velo {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_pitcher_exitvelo.csv", index=False)
     print(f"  → {len(out)} rows saved")
@@ -172,10 +206,13 @@ def fetch_pitching_expected(start: int = START_SEASON, end: int = END_SEASON) ->
     print(f"Statcast pitcher expected stats {start}-{end} ...")
     frames = []
     for year in range(start, end + 1):
-        df = pb.statcast_pitcher_expected_stats(year, minPA=50)
-        df["Season"] = year
-        frames.append(df)
-        time.sleep(1)
+        try:
+            df = _fetch_with_retry(pb.statcast_pitcher_expected_stats, year, minPA=50)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  pitcher expected {year} skipped after {MAX_RETRIES} retries: {e}")
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_pitcher_expected.csv", index=False)
     print(f"  → {len(out)} rows saved")
