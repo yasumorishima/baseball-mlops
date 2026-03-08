@@ -191,6 +191,7 @@ develop ─→  baseball-mlops-dev.streamlit.app  （開発・検証）
 ### モデル改善
 | 項目 | 概要 | 期待効果 |
 |---|---|---|
+| **Marcel 重みの MLB 最適化** | 現在 Tango 原典値（5/4/3、REG_PA=1200）を使用。NPB では最適化で MAE 1.4% 改善実績あり。MLB Statcast 期（2015〜）データでグリッドサーチ + ブートストラップ検定で再評価する | ベースライン精度向上 |
 | **Neural Network（TabNet / FT-Transformer）** | テーブルデータ向け深層学習。LGB/Cat とは異なる非線形パターンを学習 | アンサンブル多様性向上 |
 | **Similarity-Based Prediction** | 過去の類似選手キャリアパスから予測（PECOTA original approach） | 急激な衰退・ブレイクアウト検出 |
 | **Pitch-Level Features** | 球種別 Stuff+ / Location+ をピッチレベルで集約 | 投手予測の精度向上 |
