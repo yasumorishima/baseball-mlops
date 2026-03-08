@@ -117,6 +117,11 @@ BATTER_FEATURES = [
     "anglesweetspotpercent",
     # Statcast sprint speed
     "sprint_speed",
+    # v8: Bat Tracking (2024+ only, NaN for earlier years — LightGBM handles natively)
+    "avg_bat_speed", "swing_length", "squared_up_rate",
+    "blast_rate", "fast_swing_rate",
+    # v8: Batted ball direction
+    "pull_percent", "oppo_percent",
     # 基本情報
     "Age", "PA",
 ]
@@ -130,6 +135,9 @@ PITCHER_FEATURES = [
     "est_ba", "est_slg", "est_woba", "est_era",
     # Statcast exit velo (被打球)
     "avg_hit_speed", "avg_hit_angle", "brl_percent", "ev95percent",
+    # v8: Pitch-level arsenal features (aggregated per pitcher)
+    "n_pitch_types", "primary_usage", "best_whiff",
+    "avg_whiff_weighted", "best_rv100", "usage_entropy",
     # 基本情報
     "Age", "IP",
 ]
@@ -158,6 +166,9 @@ def _bat_delta_features(feats: dict) -> None:
 
     # --- v7: 2年ラグ差分（長期トレンド） ---
     feats["wOBA_delta_2"]   = _d("wOBA_y2",        "wOBA_y3")
+
+    # --- v8: Bat tracking deltas (2024+ only) ---
+    feats["bat_speed_delta_1"] = _d("avg_bat_speed_y1", "avg_bat_speed_y2")
 
     # --- v6: 交互作用 ---
     xwoba = feats.get("xwOBA_y1", np.nan)
@@ -197,6 +208,10 @@ def _pit_delta_features(feats: dict) -> None:
 
     # --- v7: 2年ラグ差分（長期トレンド） ---
     feats["xFIP_delta_2"]   = _d("xFIP_y2",   "xFIP_y3")
+
+    # --- v8: Arsenal deltas ---
+    feats["whiff_delta_1"]  = _d("best_whiff_y1",   "best_whiff_y2")
+    feats["usage_entropy_delta_1"] = _d("usage_entropy_y1", "usage_entropy_y2")
 
     # --- v6: 交互作用 ---
     kbb = feats.get("K-BB%_y1", np.nan)
@@ -369,17 +384,26 @@ LGB_PARAMS = {
 # Optuna で探索する最大木数（early_stopping で自動打ち切り）
 _MAX_ESTIMATORS = 1000
 _EARLY_STOPPING = 50
+RECENCY_DECAY = 0.85  # v8: 近年データを重み付け（Bayesと同じ decay）
+
+
+def _recency_weights(seasons: np.ndarray) -> np.ndarray:
+    """v8: LightGBM学習にも recency weighting を適用"""
+    max_s = seasons.max()
+    return np.array([RECENCY_DECAY ** (max_s - s) for s in seasons])
 
 
 def _cv_mae(params: dict, X: pd.DataFrame, y: pd.Series,
             seasons: np.ndarray) -> float:
     """時系列 CV で OOF MAE を計算（Optuna objective から呼ぶ）"""
     splits = _time_cv_splits(seasons)
+    weights = _recency_weights(seasons)  # v8: recency weighting
     oof = np.full(len(y), np.nan)
     for tr_idx, va_idx in splits:
         model = lgb.LGBMRegressor(**params)
         model.fit(
             X.iloc[tr_idx], y.iloc[tr_idx],
+            sample_weight=weights[tr_idx],  # v8
             eval_set=[(X.iloc[va_idx], y.iloc[va_idx])],
             callbacks=[lgb.early_stopping(_EARLY_STOPPING, verbose=False),
                        lgb.log_evaluation(-1)],
@@ -438,14 +462,17 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict,
         from sklearn.model_selection import KFold
         splits = list(KFold(n_splits=5, shuffle=True, random_state=42).split(X))
 
+    weights = _recency_weights(seasons) if seasons is not None else None  # v8
     oof = np.full(len(y), np.nan)
     models = []
 
     for tr_idx, va_idx in splits:
         X_tr, X_va = X.iloc[tr_idx], X.iloc[va_idx]
         y_tr, y_va = y.iloc[tr_idx], y.iloc[va_idx]
+        w_tr = weights[tr_idx] if weights is not None else None  # v8
         model = lgb.LGBMRegressor(**params)
-        model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)],
+        model.fit(X_tr, y_tr, sample_weight=w_tr,  # v8: recency weighting
+                  eval_set=[(X_va, y_va)],
                   callbacks=[lgb.early_stopping(_EARLY_STOPPING, verbose=False),
                               lgb.log_evaluation(-1)])
         oof[va_idx] = model.predict(X_va)
@@ -455,7 +482,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict,
     mae = mean_absolute_error(y[valid], oof[valid])
     # 全データで再学習（最終モデル）
     final = lgb.LGBMRegressor(**params)
-    final.fit(X, y)
+    final.fit(X, y, sample_weight=weights)  # v8: recency weighting
     return final, mae, models, oof
 
 

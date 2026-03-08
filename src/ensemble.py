@@ -1,14 +1,11 @@
 """
-逆MAE重み付きアンサンブル (Marcel + LGB + Bayes)
+逆MAE重み付きアンサンブル v8 (Marcel + LGB + CatBoost + Bayes + Component)
 
 predictions/model_metrics.json から各モデルの MAE を読み込み、
 逆 MAE 比で重み付き平均を計算して ensemble_woba / ensemble_xfip 列を追記する。
 
-入力:  predictions/batter_predictions.csv  (pred_woba, marcel_woba, bayes_woba)
-       predictions/pitcher_predictions.csv (pred_xfip, marcel_xfip, bayes_xfip)
-       predictions/model_metrics.json      (train.py + train_bayes.py が出力)
-出力:  同 CSV に ensemble_woba / ensemble_xfip 列を追記
-       W&B に weights・理論 MAE をログ
+v8: 3モデル → 5モデルに拡張（CatBoost + Component予測追加）
+    利用可能なモデルだけで動的にアンサンブルを構築（フォールバック対応）
 """
 
 import json
@@ -21,7 +18,7 @@ import wandb
 
 PRED_DIR = Path(__file__).parent.parent / "predictions"
 
-# model_metrics.json がない場合のフォールバック（直近 Optuna run の値）
+# フォールバック（全モデルが揃わない場合の基準値）
 _FALLBACK_METRICS = {
     "marcel_mae_woba": 0.0326,
     "lgb_mae_woba":    0.0294,
@@ -36,26 +33,46 @@ def _load_metrics() -> dict:
     path = PRED_DIR / "model_metrics.json"
     if path.exists():
         m = json.loads(path.read_text())
-        # 全キーが揃っているか確認
-        if all(k in m for k in _FALLBACK_METRICS):
+        # 最低限 marcel + lgb があれば動作
+        if "marcel_mae_woba" in m and "lgb_mae_woba" in m:
             return m
     return _FALLBACK_METRICS
 
 
-def _inv_mae_weights(mae_a: float, mae_b: float, mae_c: float) -> tuple[float, float, float]:
-    """3モデルの逆MAEを正規化して重みを返す。"""
-    w = np.array([1 / mae_a, 1 / mae_b, 1 / mae_c])
+def _inv_mae_weights(*maes: float) -> list[float]:
+    """N モデルの逆MAEを正規化して重みを返す。"""
+    w = np.array([1 / m for m in maes])
     w = w / w.sum()
-    return float(w[0]), float(w[1]), float(w[2])
+    return [float(x) for x in w]
 
 
-def _theoretical_mae(w: tuple, maes: tuple) -> float:
+def _theoretical_mae(weights: list, maes: list) -> float:
+    return float(np.sqrt(sum(w**2 * m**2 for w, m in zip(weights, maes))))
+
+
+def _ensemble_col(df: pd.DataFrame, model_specs: list[tuple[str, str, float]],
+                  fallback_val: float) -> pd.Series:
     """
-    独立予測の重み付きアンサンブル MAE の下界（誤差間の相関 = 0 を仮定）:
-      MAE_ens ≈ sqrt(sum(w_i^2 * MAE_i^2))
-    実際の相関は正なので真の MAE はこれより大きいが、参考値として使う。
+    model_specs: [(col_name, fallback_col, weight), ...]
+    動的にアンサンブルを計算。
     """
-    return float(np.sqrt(sum(wi**2 * mi**2 for wi, mi in zip(w, maes))))
+    result = pd.Series(0.0, index=df.index)
+    total_weight = 0.0
+    for col, fallback_col, w in model_specs:
+        if col in df.columns:
+            vals = df[col].fillna(df.get(fallback_col, fallback_val))
+            result += w * vals
+            total_weight += w
+    if total_weight > 0:
+        result = result / total_weight * sum(w for _, _, w in model_specs if _ in df.columns)
+        # Re-normalize: just use proper weighted average
+        result = pd.Series(0.0, index=df.index)
+        norm = sum(w for col, _, w in model_specs if col in df.columns)
+        for col, fallback_col, w in model_specs:
+            if col in df.columns:
+                vals = df[col].fillna(df.get(fallback_col, fallback_val))
+                result += (w / norm) * vals
+    return result
 
 
 def run():
@@ -63,49 +80,80 @@ def run():
 
     # ===== 打者 wOBA =====
     bat_path = PRED_DIR / "batter_predictions.csv"
+    bat_weights = {}
     if bat_path.exists():
         bat = pd.read_csv(bat_path)
-        if all(c in bat.columns for c in ["pred_woba", "marcel_woba", "bayes_woba"]):
-            w_m, w_lgb, w_b = _inv_mae_weights(
-                metrics["marcel_mae_woba"],
-                metrics["lgb_mae_woba"],
-                metrics["bayes_mae_woba"],
-            )
-            bat["ensemble_woba"] = (
-                w_m   * bat["marcel_woba"].fillna(0.320) +
-                w_lgb * bat["pred_woba"].fillna(bat["marcel_woba"]) +
-                w_b   * bat["bayes_woba"].fillna(bat["marcel_woba"])
-            ).round(3)
+
+        # 利用可能なモデルを動的に検出
+        available = []
+        model_cols = [
+            ("marcel_woba", "marcel_mae_woba"),
+            ("pred_woba",   "lgb_mae_woba"),
+            ("cat_woba",    "cat_mae_woba"),
+            ("bayes_woba",  "bayes_mae_woba"),
+            ("component_woba", "component_mae_woba"),
+        ]
+        for col, mae_key in model_cols:
+            if col in bat.columns and mae_key in metrics:
+                available.append((col, metrics[mae_key]))
+
+        if len(available) >= 2:
+            names = [a[0] for a in available]
+            maes = [a[1] for a in available]
+            weights = _inv_mae_weights(*maes)
+
+            ensemble = pd.Series(0.0, index=bat.index)
+            for (col, _), w in zip(available, weights):
+                ensemble += w * bat[col].fillna(bat.get("marcel_woba", 0.320))
+            bat["ensemble_woba"] = ensemble.round(3)
             bat.to_csv(bat_path, index=False)
-            print(f"Batter ensemble: w_marcel={w_m:.3f}, w_lgb={w_lgb:.3f}, w_bayes={w_b:.3f}")
+
+            weight_str = ", ".join(f"{col}={w:.3f}" for (col, _), w in zip(available, weights))
+            print(f"Batter ensemble ({len(available)} models): {weight_str}")
+            bat_weights = dict(zip(names, weights))
+
+            theo = _theoretical_mae(weights, maes)
+            print(f"  wOBA theoretical MAE: {theo:.4f} (best single: {min(maes):.4f})")
         else:
-            w_m = w_lgb = w_b = None
-            print("Batter: missing columns, skipped")
-    else:
-        w_m = w_lgb = w_b = None
+            print("Batter: insufficient models for ensemble")
 
     # ===== 投手 xFIP =====
     pit_path = PRED_DIR / "pitcher_predictions.csv"
+    pit_weights = {}
     if pit_path.exists():
         pit = pd.read_csv(pit_path)
-        if all(c in pit.columns for c in ["pred_xfip", "marcel_xfip", "bayes_xfip"]):
-            w_m_p, w_lgb_p, w_b_p = _inv_mae_weights(
-                metrics["marcel_mae_xfip"],
-                metrics["lgb_mae_xfip"],
-                metrics["bayes_mae_xfip"],
-            )
-            pit["ensemble_xfip"] = (
-                w_m_p   * pit["marcel_xfip"].fillna(4.20) +
-                w_lgb_p * pit["pred_xfip"].fillna(pit["marcel_xfip"]) +
-                w_b_p   * pit["bayes_xfip"].fillna(pit["marcel_xfip"])
-            ).round(2)
+
+        available = []
+        model_cols = [
+            ("marcel_xfip", "marcel_mae_xfip"),
+            ("pred_xfip",   "lgb_mae_xfip"),
+            ("cat_xfip",    "cat_mae_xfip"),
+            ("bayes_xfip",  "bayes_mae_xfip"),
+            ("component_xfip", "component_mae_xfip"),
+        ]
+        for col, mae_key in model_cols:
+            if col in pit.columns and mae_key in metrics:
+                available.append((col, metrics[mae_key]))
+
+        if len(available) >= 2:
+            names = [a[0] for a in available]
+            maes = [a[1] for a in available]
+            weights = _inv_mae_weights(*maes)
+
+            ensemble = pd.Series(0.0, index=pit.index)
+            for (col, _), w in zip(available, weights):
+                ensemble += w * pit[col].fillna(pit.get("marcel_xfip", 4.20))
+            pit["ensemble_xfip"] = ensemble.round(2)
             pit.to_csv(pit_path, index=False)
-            print(f"Pitcher ensemble: w_marcel={w_m_p:.3f}, w_lgb={w_lgb_p:.3f}, w_bayes={w_b_p:.3f}")
+
+            weight_str = ", ".join(f"{col}={w:.3f}" for (col, _), w in zip(available, weights))
+            print(f"Pitcher ensemble ({len(available)} models): {weight_str}")
+            pit_weights = dict(zip(names, weights))
+
+            theo = _theoretical_mae(weights, maes)
+            print(f"  xFIP theoretical MAE: {theo:.4f} (best single: {min(maes):.4f})")
         else:
-            w_m_p = w_lgb_p = w_b_p = None
-            print("Pitcher: missing columns, skipped")
-    else:
-        w_m_p = w_lgb_p = w_b_p = None
+            print("Pitcher: insufficient models for ensemble")
 
     # ===== W&B ログ =====
     wandb.login(key=os.environ.get("WANDB_API_KEY"))
@@ -113,30 +161,12 @@ def run():
     run_wb = wandb.init(project="baseball-mlops", entity=entity, job_type="ensemble")
 
     log_dict = {k: v for k, v in metrics.items()}
-    if w_m is not None:
-        theo_woba = _theoretical_mae(
-            (w_m, w_lgb, w_b),
-            (metrics["marcel_mae_woba"], metrics["lgb_mae_woba"], metrics["bayes_mae_woba"]),
-        )
-        log_dict.update({
-            "ensemble_w_marcel_woba": round(w_m, 3),
-            "ensemble_w_lgb_woba":    round(w_lgb, 3),
-            "ensemble_w_bayes_woba":  round(w_b, 3),
-            "ensemble_theoretical_mae_woba": round(theo_woba, 4),
-        })
-        print(f"  wOBA theoretical MAE: {theo_woba:.4f} (best single: {metrics['bayes_mae_woba']:.4f})")
-    if w_m_p is not None:
-        theo_xfip = _theoretical_mae(
-            (w_m_p, w_lgb_p, w_b_p),
-            (metrics["marcel_mae_xfip"], metrics["lgb_mae_xfip"], metrics["bayes_mae_xfip"]),
-        )
-        log_dict.update({
-            "ensemble_w_marcel_xfip": round(w_m_p, 3),
-            "ensemble_w_lgb_xfip":    round(w_lgb_p, 3),
-            "ensemble_w_bayes_xfip":  round(w_b_p, 3),
-            "ensemble_theoretical_mae_xfip": round(theo_xfip, 4),
-        })
-        print(f"  xFIP theoretical MAE: {theo_xfip:.4f} (best single: {metrics['bayes_mae_xfip']:.4f})")
+    for name, w in bat_weights.items():
+        log_dict[f"ensemble_w_{name}"] = round(w, 3)
+    for name, w in pit_weights.items():
+        log_dict[f"ensemble_w_{name}"] = round(w, 3)
+    log_dict["n_models_batter"] = len(bat_weights)
+    log_dict["n_models_pitcher"] = len(pit_weights)
 
     wandb.log(log_dict)
     run_wb.finish()

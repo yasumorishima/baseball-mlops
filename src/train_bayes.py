@@ -78,8 +78,13 @@ _BAT_RAW = [
     "avg_hit_angle", "ev95percent",
     # FanGraphs
     "HardHit%", "Contact%", "O-Swing%", "PA", "G", "SwStr%", "maxEV",
-    # スタッキング特徴量: LightGBM OOF delta
+    # v8: Bat Tracking (2024+ only, SimpleImputer handles NaN)
+    "avg_bat_speed", "swing_length", "squared_up_rate",
+    # v8: Batted ball direction
+    "pull_percent", "oppo_percent",
+    # スタッキング特徴量: LightGBM + CatBoost OOF delta
     "lgb_delta",
+    "cat_delta",  # v8: CatBoost stacking
 ]
 _BAT_ENG = [
     "age_from_peak", "age_sq", "pa_rate", "xwoba_luck", "park_factor",
@@ -96,8 +101,11 @@ _PIT_RAW = [
     "HardHit%", "K-BB%", "CSW%", "IP", "G", "SwStr%",
     # FanGraphs (2020+ のみ、SimpleImputer が NaN を補完)
     "Stuff+", "Location+", "Pitching+",
-    # スタッキング特徴量: LightGBM OOF delta
+    # v8: Arsenal features (aggregated)
+    "n_pitch_types", "best_whiff", "avg_whiff_weighted", "usage_entropy",
+    # スタッキング特徴量: LightGBM + CatBoost OOF delta
     "lgb_delta",
+    "cat_delta",  # v8: CatBoost stacking
 ]
 _PIT_ENG = [
     "age_from_peak", "age_sq", "ip_rate", "park_factor",
@@ -167,7 +175,8 @@ def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                          target_col: str,
                          min_prev_season: int,
                          pf_lookup: dict | None = None,
-                         lgb_oof: dict | None = None) -> pd.DataFrame:
+                         lgb_oof: dict | None = None,
+                         cat_oof: dict | None = None) -> pd.DataFrame:
     """
     y = actual(t+1) - marcel_pred(t+1)
     X = t 時点の raw + engineered 特徴量 + lgb_delta（スタッキング）
@@ -207,6 +216,13 @@ def build_delta_dataset(df: pd.DataFrame, raw_cols: list, eng_fn,
                 raw_feats["lgb_delta"] = (lgb_pred - marcel) if lgb_pred is not None else np.nan
             else:
                 raw_feats["lgb_delta"] = np.nan
+
+            # v8: CatBoost スタッキング特徴量
+            if cat_oof:
+                cat_pred = cat_oof.get((str(player), year))
+                raw_feats["cat_delta"] = (cat_pred - marcel) if cat_pred is not None else np.nan
+            else:
+                raw_feats["cat_delta"] = np.nan
 
             # engineered features
             eng_feats = eng_fn(prev_row)
@@ -354,6 +370,12 @@ def run():
     print(f"  lgb_oof_batter:  {'loaded' if lgb_oof_bat else 'not found (lgb_delta=NaN)'}")
     print(f"  lgb_oof_pitcher: {'loaded' if lgb_oof_pit else 'not found (lgb_delta=NaN)'}")
 
+    # v8: CatBoost OOF ロード（スタッキング用）
+    cat_oof_bat = _load_lgb_oof(RAW_DIR / "cat_oof_batter.csv")
+    cat_oof_pit = _load_lgb_oof(RAW_DIR / "cat_oof_pitcher.csv")
+    print(f"  cat_oof_batter:  {'loaded' if cat_oof_bat else 'not found (cat_delta=NaN)'}")
+    print(f"  cat_oof_pitcher: {'loaded' if cat_oof_pit else 'not found (cat_delta=NaN)'}")
+
     # ===== 打者 wOBA (min_prev={MIN_PREV_SEASON_BAT}) =====
     print(f"=== Batter Bayes (wOBA, min_prev={MIN_PREV_SEASON_BAT}) ===")
     bat_df = pd.read_csv(RAW_DIR / "batter_features.csv")
@@ -362,6 +384,7 @@ def run():
         min_prev_season=MIN_PREV_SEASON_BAT,
         pf_lookup=pf_lookup,
         lgb_oof=lgb_oof_bat,
+        cat_oof=cat_oof_bat,  # v8
     )
     print(f"  delta dataset: {len(delta_bat)} samples")
 
@@ -392,6 +415,7 @@ def run():
         min_prev_season=MIN_PREV_SEASON_PIT,
         pf_lookup=pf_lookup,
         lgb_oof=lgb_oof_pit,
+        cat_oof=cat_oof_pit,  # v8
     )
     print(f"  delta dataset: {len(delta_pit)} samples")
 
@@ -482,6 +506,10 @@ def _update_batter_predictions(bat_df: pd.DataFrame, pipe: Pipeline, sigma: floa
         marcel_v = float(row.get("marcel_woba", MLB_AVG_WOBA))
         raw_feats["lgb_delta"] = (lgb_pred - marcel_v) if not np.isnan(lgb_pred) else np.nan
 
+        # v8: CatBoost delta
+        cat_pred = float(row.get("cat_woba", np.nan))
+        raw_feats["cat_delta"] = (cat_pred - marcel_v) if not np.isnan(cat_pred) else np.nan
+
         eng_feats = _eng_batter(prev_row)
 
         # 動的 park_factor
@@ -546,6 +574,10 @@ def _update_pitcher_predictions(pit_df: pd.DataFrame, pipe: Pipeline, sigma: flo
         lgb_pred = float(row.get("pred_xfip", np.nan))
         marcel_v = float(row.get("marcel_xfip", MLB_AVG_XFIP))
         raw_feats["lgb_delta"] = (lgb_pred - marcel_v) if not np.isnan(lgb_pred) else np.nan
+
+        # v8: CatBoost delta
+        cat_pred = float(row.get("cat_xfip", np.nan))
+        raw_feats["cat_delta"] = (cat_pred - marcel_v) if not np.isnan(cat_pred) else np.nan
 
         eng_feats = _eng_pitcher(prev_row)
 

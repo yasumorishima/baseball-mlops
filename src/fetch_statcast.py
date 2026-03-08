@@ -12,6 +12,7 @@ Data sources:
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pybaseball as pb
 
@@ -73,6 +74,28 @@ def fetch_batting_expected(start: int = START_SEASON, end: int = END_SEASON) -> 
     return out
 
 
+def fetch_batted_ball(start: int = START_SEASON, end: int = END_SEASON) -> pd.DataFrame:
+    """Statcast batted ball direction stats (pull/oppo rates)"""
+    print(f"Statcast batted ball {start}-{end} ...")
+    from savant_extras import batted_ball
+    frames = []
+    for year in range(start, end + 1):
+        try:
+            df = batted_ball(year, player_type="batter", min_bbe="q")
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  batted ball {year} skipped: {e}")
+    if not frames:
+        print("  → no batted ball data")
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out.to_csv(DATA_DIR / "sc_batted_ball.csv", index=False)
+    print(f"  → {len(out)} rows saved")
+    return out
+
+
 def fetch_sprint_speed(start: int = START_SEASON, end: int = END_SEASON) -> pd.DataFrame:
     """Statcast スプリントスピード"""
     print(f"Statcast sprint speed {start}-{end} ...")
@@ -84,6 +107,28 @@ def fetch_sprint_speed(start: int = START_SEASON, end: int = END_SEASON) -> pd.D
         time.sleep(1)
     out = pd.concat(frames, ignore_index=True)
     out.to_csv(DATA_DIR / "sc_sprint_speed.csv", index=False)
+    print(f"  → {len(out)} rows saved")
+    return out
+
+
+def fetch_bat_tracking(start: int = 2024, end: int = END_SEASON) -> pd.DataFrame:
+    """Statcast bat tracking (Hawk-Eye, 2024+): bat_speed, swing_length, squared_up等"""
+    print(f"Statcast bat tracking {start}-{end} ...")
+    from savant_extras import bat_tracking
+    frames = []
+    for year in range(max(start, 2024), end + 1):
+        try:
+            df = bat_tracking(f"{year}-03-20", f"{year}-11-05", player_type="batter", min_swings="q")
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(2)
+        except Exception as e:
+            print(f"  bat tracking {year} skipped: {e}")
+    if not frames:
+        print("  → no bat tracking data")
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out.to_csv(DATA_DIR / "sc_bat_tracking.csv", index=False)
     print(f"  → {len(out)} rows saved")
     return out
 
@@ -137,6 +182,27 @@ def fetch_pitching_expected(start: int = START_SEASON, end: int = END_SEASON) ->
     return out
 
 
+def fetch_pitcher_arsenal(start: int = START_SEASON, end: int = END_SEASON) -> pd.DataFrame:
+    """Statcast pitch-level arsenal stats (per pitch type per pitcher)"""
+    print(f"Statcast pitcher arsenal {start}-{end} ...")
+    frames = []
+    for year in range(start, end + 1):
+        try:
+            df = pb.statcast_pitcher_arsenal_stats(year, minPA=25)
+            df["Season"] = year
+            frames.append(df)
+            time.sleep(1)
+        except Exception as e:
+            print(f"  arsenal {year} skipped: {e}")
+    if not frames:
+        print("  → no arsenal data")
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out.to_csv(DATA_DIR / "sc_pitcher_arsenal.csv", index=False)
+    print(f"  → {len(out)} rows saved")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # マージ
 # ---------------------------------------------------------------------------
@@ -179,11 +245,64 @@ def build_batter_features() -> pd.DataFrame:
         sc = sc.merge(spd[["player", "season", "sprint_speed"]],
                       on=["player", "season"], how="left")
 
+    # Bat tracking (2024+)
+    bt_path = DATA_DIR / "sc_bat_tracking.csv"
+    if bt_path.exists():
+        bt = pd.read_csv(bt_path)
+        bt = _sc_player_col(bt)
+        bt_cols = ["player", "season"] + [c for c in bt.columns
+                   if c in ("avg_bat_speed", "swing_length", "squared_up_rate",
+                            "blast_rate", "fast_swing_rate", "swords_rate")]
+        bt_cols = [c for c in bt_cols if c in bt.columns]
+        if len(bt_cols) > 2:
+            sc = sc.merge(bt[bt_cols], on=["player", "season"], how="left")
+
+    # Batted ball (pull/oppo rates)
+    bb_path = DATA_DIR / "sc_batted_ball.csv"
+    if bb_path.exists():
+        bb = pd.read_csv(bb_path)
+        bb = _sc_player_col(bb)
+        bb_cols = ["player", "season"] + [c for c in bb.columns
+                   if c in ("pull_percent", "oppo_percent", "pull_rate", "oppo_rate")]
+        bb_cols = [c for c in bb_cols if c in bb.columns]
+        if len(bb_cols) > 2:
+            sc = sc.merge(bb[bb_cols], on=["player", "season"], how="left")
+
     merged = fg.merge(sc, on=["player", "season"], how="left")
     out_path = DATA_DIR / "batter_features.csv"
     merged.to_csv(out_path, index=False)
     print(f"Batter features: {len(merged)} rows, cols sample: {list(merged.columns[:8])}")
     return merged
+
+
+def _aggregate_pitcher_arsenal() -> pd.DataFrame:
+    """pitch-type別データを投手×シーズンに集約"""
+    path = DATA_DIR / "sc_pitcher_arsenal.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    df = _sc_player_col(df)
+    if "Season" in df.columns and "season" not in df.columns:
+        df = df.rename(columns={"Season": "season"})
+
+    records = []
+    for (player, season), grp in df.groupby(["player", "season"]):
+        n_types = len(grp)
+        usage = grp["pitch_usage"].values if "pitch_usage" in grp.columns else np.array([1/n_types]*n_types)
+        whiff = grp["whiff_percent"].values if "whiff_percent" in grp.columns else np.array([np.nan]*n_types)
+        rv100 = grp["run_value_per_100"].values if "run_value_per_100" in grp.columns else np.array([np.nan]*n_types)
+
+        records.append({
+            "player": player,
+            "season": season,
+            "n_pitch_types": n_types,
+            "primary_usage": float(np.nanmax(usage)) if len(usage) > 0 else np.nan,
+            "best_whiff": float(np.nanmax(whiff)) if len(whiff) > 0 else np.nan,
+            "avg_whiff_weighted": float(np.nansum(usage * whiff) / np.nansum(usage)) if np.nansum(usage) > 0 else np.nan,
+            "best_rv100": float(np.nanmin(rv100)) if len(rv100) > 0 else np.nan,  # lower = better
+            "usage_entropy": float(-np.nansum(usage * np.log2(np.clip(usage, 1e-10, 1)))) if len(usage) > 0 else np.nan,
+        })
+    return pd.DataFrame(records)
 
 
 def build_pitcher_features() -> pd.DataFrame:
@@ -201,6 +320,11 @@ def build_pitcher_features() -> pd.DataFrame:
         if c in exp.columns
     ]
     sc = ev.merge(exp[exp_cols], on=["player", "season"], how="left")
+
+    # Arsenal features (aggregated)
+    arsenal_agg = _aggregate_pitcher_arsenal()
+    if len(arsenal_agg) > 0:
+        sc = sc.merge(arsenal_agg, on=["player", "season"], how="left")
 
     merged = fg.merge(sc, on=["player", "season"], how="left")
     out_path = DATA_DIR / "pitcher_features.csv"
@@ -224,10 +348,13 @@ if __name__ == "__main__":
     fetch_batting_fangraphs()
     fetch_batting_exitvelo()
     fetch_batting_expected()
+    fetch_batted_ball()        # NEW
     fetch_sprint_speed()
+    fetch_bat_tracking()       # NEW
     fetch_pitching_fangraphs()
     fetch_pitching_exitvelo()
     fetch_pitching_expected()
+    fetch_pitcher_arsenal()    # NEW
     build_batter_features()
     build_pitcher_features()
     print("All done.")

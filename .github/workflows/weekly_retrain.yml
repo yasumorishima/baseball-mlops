@@ -3,14 +3,19 @@ name: Weekly Retrain
 on:
   schedule:
     - cron: "0 2 * * 1"   # 毎週月曜 UTC 02:00 (JST 11:00)
-  workflow_dispatch:        # 手動実行も可
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'この実行の意図'
+        required: false
+        type: string
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     permissions:
-      contents: write   # predictions/ の自動コミット & プッシュに必要
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -25,25 +30,57 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Fetch Statcast data
+      - name: Fetch Statcast data (incl. bat tracking + arsenal)
         run: python src/fetch_statcast.py
         env:
           PYBASEBALL_CACHE: "1"
 
-      - name: Train models & log to W&B
+      - name: Train LightGBM (Optuna 1000 trials + recency weight)
         run: python src/train.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Train Bayes model
+      - name: Train CatBoost (Optuna 500 trials + recency weight)
+        run: python src/train_catboost.py
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+
+      - name: Train Component models (PECOTA approach)
+        run: python src/train_components.py
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+
+      - name: Train Bayes model (ElasticNet + LGB/Cat stacking)
         run: python src/train_bayes.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Ensemble (inverse-MAE weighted)
-        run: python src/ensemble.py
+      - name: Ensemble (5-model inverse-MAE weighted)
+        id: ensemble
+        run: |
+          python src/ensemble.py 2>&1 | tee /tmp/ensemble_output.txt
+          # Extract MAE values for Discord notification
+          python3 -c "
+          import json
+          from pathlib import Path
+          m = json.loads(Path('predictions/model_metrics.json').read_text())
+          lines = []
+          for k in ['lgb_mae_woba', 'cat_mae_woba', 'bayes_mae_woba', 'component_mae_woba', 'marcel_mae_woba']:
+              if k in m:
+                  label = k.replace('_mae_woba', '').replace('lgb', 'LGB').replace('cat', 'Cat').replace('bayes', 'Bayes').replace('component', 'Comp').replace('marcel', 'Marcel')
+                  lines.append(f'{label}: {m[k]:.4f}')
+          print('BAT_MAE=' + ' | '.join(lines))
+          lines2 = []
+          for k in ['lgb_mae_xfip', 'cat_mae_xfip', 'bayes_mae_xfip', 'component_mae_xfip', 'marcel_mae_xfip']:
+              if k in m:
+                  label = k.replace('_mae_xfip', '').replace('lgb', 'LGB').replace('cat', 'Cat').replace('bayes', 'Bayes').replace('component', 'Comp').replace('marcel', 'Marcel')
+                  lines2.append(f'{label}: {m[k]:.4f}')
+          print('PIT_MAE=' + ' | '.join(lines2))
+          " >> "$GITHUB_OUTPUT"
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
@@ -64,7 +101,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add predictions/
-          git diff --staged --quiet || git commit -m "chore: update predictions [skip ci]"
+          git diff --staged --quiet || git commit -m "chore: update predictions (v8 5-model ensemble) [skip ci]"
           git pull --rebase origin ${{ github.ref_name }}
           git push
 
@@ -79,18 +116,25 @@ jobs:
       - name: Notify Discord (success)
         if: success()
         run: |
+          BAT_MAE="${{ steps.ensemble.outputs.BAT_MAE }}"
+          PIT_MAE="${{ steps.ensemble.outputs.PIT_MAE }}"
+          MEMO="${{ inputs.memo }}"
           curl -s -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"✅ baseball-mlops 再学習完了\",
+                \"title\": \"✅ baseball-mlops v8 再学習完了\",
                 \"color\": 3066993,
                 \"fields\": [
+                  {\"name\": \"打者 wOBA MAE\", \"value\": \"${BAT_MAE:-計測中}\", \"inline\": false},
+                  {\"name\": \"投手 xFIP MAE\", \"value\": \"${PIT_MAE:-計測中}\", \"inline\": false},
+                  {\"name\": \"モデル構成\", \"value\": \"LGB+Cat+Bayes+Component+Marcel (5-model)\", \"inline\": false},
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
                   {\"name\": \"トリガー\", \"value\": \"${{ github.event_name }}\", \"inline\": true},
+                  {\"name\": \"メモ\", \"value\": \"${MEMO:-cron}\", \"inline\": true},
                   {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
                 ],
-                \"footer\": {\"text\": \"Optuna 1000 trials + Bayes CI\"}
+                \"footer\": {\"text\": \"v8: Bat Tracking + Arsenal + CatBoost + PECOTA Components\"}
               }]
             }"
         env:
@@ -100,14 +144,16 @@ jobs:
       - name: Notify Discord (failure)
         if: failure()
         run: |
+          MEMO="${{ inputs.memo }}"
           curl -s -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"❌ baseball-mlops 再学習失敗\",
+                \"title\": \"❌ baseball-mlops v8 再学習失敗\",
                 \"color\": 15158332,
                 \"fields\": [
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
+                  {\"name\": \"メモ\", \"value\": \"${MEMO:-cron}\", \"inline\": true},
                   {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
                 ]
               }]
