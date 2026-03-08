@@ -246,13 +246,18 @@ def fetch_pitcher_arsenal(start: int = START_SEASON, end: int = END_SEASON) -> p
 
 def _sc_player_col(df: pd.DataFrame) -> pd.DataFrame:
     """Statcast CSV の選手名カラムを統一し season カラムを生成する"""
-    # player 名の構築（"last_name, first_name" 結合型 or 別カラム型どちらにも対応）
+    # player 名の構築（複数の命名パターンに対応）
     if "last_name, first_name" in df.columns:
         df["player"] = df["last_name, first_name"].str.split(", ").apply(
             lambda x: f"{x[1]} {x[0]}" if len(x) == 2 else x[0]
         )
     elif "last_name" in df.columns and "first_name" in df.columns:
         df["player"] = df["first_name"] + " " + df["last_name"]
+    elif "name" in df.columns and "player" not in df.columns:
+        # savant_extras 形式: "Last, First" → "First Last"
+        df["player"] = df["name"].apply(
+            lambda x: f"{x.split(', ')[1]} {x.split(', ')[0]}" if ", " in str(x) else str(x)
+        )
     # season カラム統一（year / Season → season）
     for src in ("year", "Season"):
         if src in df.columns and "season" not in df.columns:
