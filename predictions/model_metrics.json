@@ -1,8 +1,8 @@
 {
-  "lgb_mae_woba": 0.0294,
-  "lgb_mae_xfip": 0.5316,
+  "lgb_mae_woba": 0.0295,
+  "lgb_mae_xfip": 0.5321,
   "marcel_mae_woba": 0.0326,
   "marcel_mae_xfip": 0.5576,
   "bayes_mae_woba": 0.0286,
-  "bayes_mae_xfip": 0.4835
+  "bayes_mae_xfip": 0.4823
 }
