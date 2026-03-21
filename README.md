@@ -1,14 +1,16 @@
 # baseball-mlops
 
-**MLB Statcast × MLOps — Weekly auto-retrained player performance prediction**
+**MLB Statcast × GCP × MLOps — Weekly auto-retrained player performance prediction**
 
 MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
-Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで継続運用する。
+Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuery + BigQuery ML + Cloud Run)** 上で MLOps パイプラインとして継続運用する。
 
-| 環境 | URL |
-|---|---|
-| 本番 | https://baseball-mlops.streamlit.app/ |
-| 開発（Spring Training 検証） | https://baseball-mlops-dev.streamlit.app/ |
+| 環境 | URL | 説明 |
+|---|---|---|
+| 本番 API | Cloud Run (`baseball-mlops-api`) | FastAPI サーバーレス推論 |
+| 本番 Dashboard | https://baseball-mlops.streamlit.app/ | Streamlit Cloud |
+| 開発 Dashboard | https://baseball-mlops-dev.streamlit.app/ | Spring Training 検証 |
+| データ基盤 | BigQuery `data-platform-490901.mlb_statcast` | 生データ + BQML モデル |
 
 ## 解説記事
 
@@ -292,6 +294,8 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 ### インフラ・運用
 | 項目 | 概要 |
 |---|---|
+| **BQML アンサンブル統合** | BQML Boosted Tree の精度が Python 版に迫れば、Cloud Run API で BQML 予測も返す |
+| **BigQuery Scheduled Query** | BigQuery 上で定期分析クエリを自動実行し、ダッシュボードに反映 |
 | **A/B テスト基盤** | 新モデルと production モデルを並行評価し自動昇格 |
 | **Data Drift 検出** | 入力特徴量の分布変化を W&B で監視・アラート |
 | **Streamlit 選手比較機能** | 2選手の予測・特徴量を横並び比較 |
