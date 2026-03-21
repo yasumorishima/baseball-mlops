@@ -72,7 +72,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | モデル (Python) | LightGBM + CatBoost + ElasticNet Bayes + Component (PECOTA方式) |
 | モデル (BQML) | Boosted Tree Regressor + 線形回帰（SQL だけで ML） |
 | 最適化 | Optuna（LGB 1000 / CatBoost 500 / Component 各200 trials） |
-| ベースライン | MLB Marcel 法（加重平均 + 平均回帰 + 年齢調整） |
+| ベースライン | Marcel 法（Tom Tango考案、加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
 | データ基盤 | BigQuery — 生データ13テーブル + 予測結果 + メトリクス履歴 |
