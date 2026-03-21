@@ -1,0 +1,174 @@
+-- BigQuery 分析用ビュー
+-- Statcast 生データを活用した分析クエリ集
+
+-- ============================================================
+-- 1. 選手年度別 wOBA トレンド（打者パフォーマンス推移）
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batter_trend` AS
+SELECT
+  player,
+  season,
+  wOBA,
+  xwOBA,
+  `K_pct`,
+  `BB_pct`,
+  avg_hit_speed,
+  brl_percent,
+  sprint_speed,
+  avg_bat_speed,
+  swing_length,
+  PA,
+  Age,
+  Team,
+  -- 前年比
+  wOBA - LAG(wOBA) OVER (PARTITION BY player ORDER BY season) AS wOBA_yoy,
+  xwOBA - LAG(xwOBA) OVER (PARTITION BY player ORDER BY season) AS xwOBA_yoy,
+  avg_hit_speed - LAG(avg_hit_speed) OVER (PARTITION BY player ORDER BY season) AS ev_yoy,
+  -- xwOBA - wOBA 乖離（運要素の指標）
+  xwOBA - wOBA AS luck_factor
+FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+ORDER BY player, season;
+
+
+-- ============================================================
+-- 2. 選手年度別 xFIP トレンド（投手パフォーマンス推移）
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_pitcher_trend` AS
+SELECT
+  player,
+  season,
+  xFIP,
+  FIP,
+  ERA,
+  `K_pct`,
+  `BB_pct`,
+  avg_hit_speed,
+  brl_percent,
+  n_pitch_types,
+  best_whiff,
+  usage_entropy,
+  IP,
+  Age,
+  Team,
+  -- 前年比
+  xFIP - LAG(xFIP) OVER (PARTITION BY player ORDER BY season) AS xFIP_yoy,
+  `K_pct` - LAG(`K_pct`) OVER (PARTITION BY player ORDER BY season) AS K_pct_yoy,
+  -- FIP-ERA 乖離（運要素）
+  ERA - FIP AS era_fip_gap
+FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
+ORDER BY player, season;
+
+
+-- ============================================================
+-- 3. Statcast 打球品質リーダーボード（シーズン別）
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batted_ball_leaders` AS
+SELECT
+  b.player,
+  b.season,
+  b.avg_hit_speed,
+  b.brl_percent,
+  b.ev95percent,
+  b.anglesweetspotpercent,
+  bb.pull_percent,
+  bb.oppo_percent,
+  bt.avg_bat_speed,
+  bt.swing_length,
+  bt.squared_up_rate,
+  bt.blast_rate,
+  bt.fast_swing_rate,
+  f.wOBA,
+  f.xwOBA,
+  f.PA
+FROM `data-platform-490901.mlb_statcast.raw_sc_batter_exitvelo` b
+LEFT JOIN `data-platform-490901.mlb_statcast.raw_sc_batted_ball` bb
+  ON b.player = bb.player AND b.season = bb.season
+LEFT JOIN `data-platform-490901.mlb_statcast.raw_sc_bat_tracking` bt
+  ON b.player = bt.player AND b.season = bt.season
+LEFT JOIN `data-platform-490901.mlb_statcast.raw_fg_batting` f
+  ON b.player = f.player AND b.season = f.season
+ORDER BY b.avg_hit_speed DESC;
+
+
+-- ============================================================
+-- 4. 投手球種戦略分析（Arsenal 集約）
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_pitcher_arsenal` AS
+SELECT
+  player,
+  season,
+  n_pitch_types,
+  primary_usage,
+  best_whiff,
+  avg_whiff_weighted,
+  best_rv100,
+  usage_entropy,
+  -- 球種数とエントロピーの関係
+  CASE
+    WHEN n_pitch_types >= 5 AND usage_entropy > 1.2 THEN 'diverse'
+    WHEN n_pitch_types <= 3 AND primary_usage > 0.6 THEN 'specialist'
+    ELSE 'balanced'
+  END AS arsenal_type
+FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
+WHERE n_pitch_types IS NOT NULL
+ORDER BY usage_entropy DESC;
+
+
+-- ============================================================
+-- 5. 球場補正効果分析
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_park_effects` AS
+SELECT
+  team,
+  season,
+  pf_5yr,
+  CASE
+    WHEN pf_5yr > 105 THEN 'hitter_park'
+    WHEN pf_5yr < 95 THEN 'pitcher_park'
+    ELSE 'neutral'
+  END AS park_type
+FROM `data-platform-490901.mlb_statcast.raw_park_factors`
+ORDER BY season DESC, pf_5yr DESC;
+
+
+-- ============================================================
+-- 6. BQML vs Python 全モデル精度比較ダッシュボード
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_model_comparison` AS
+SELECT
+  run_date,
+  run_timestamp,
+  -- Python models
+  lgb_mae_woba,
+  cat_mae_woba,
+  bayes_mae_woba,
+  component_mae_woba,
+  marcel_mae_woba,
+  -- BQML models (追加時に列が自動拡張)
+  bqml_bt_mae_woba,
+  bqml_linear_mae_woba,
+  bqml_bt_mae_xfip,
+  bqml_linear_mae_xfip,
+  -- Python models (投手)
+  lgb_mae_xfip,
+  cat_mae_xfip,
+  bayes_mae_xfip,
+  component_mae_xfip,
+  marcel_mae_xfip
+FROM `data-platform-490901.mlb_statcast.model_metrics_history`
+ORDER BY run_date DESC;
+
+
+-- ============================================================
+-- 7. シーズン別データ量サマリー
+-- ============================================================
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_data_coverage` AS
+SELECT
+  season,
+  COUNT(DISTINCT player) AS n_batters,
+  AVG(PA) AS avg_pa,
+  COUNT(DISTINCT CASE WHEN avg_bat_speed IS NOT NULL THEN player END) AS n_bat_tracking,
+  COUNT(DISTINCT CASE WHEN pull_percent IS NOT NULL THEN player END) AS n_batted_ball
+FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+GROUP BY season
+ORDER BY season;

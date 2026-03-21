@@ -85,7 +85,48 @@ jobs:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Trigger API reload (optional)
+      # === GCP BigQuery + BQML ===
+      - name: Setup GCP credentials
+        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
+        continue-on-error: true
+
+      - name: Load all data to BigQuery
+        run: python src/load_to_bq.py --all --metrics
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        continue-on-error: true
+
+      - name: Train & evaluate BQML models
+        id: bqml
+        run: |
+          python src/bqml_train.py --all 2>&1 | tee /tmp/bqml_output.txt
+          # Extract BQML MAE for Discord
+          python3 -c "
+          import json
+          from pathlib import Path
+          m = json.loads(Path('predictions/model_metrics.json').read_text())
+          parts = []
+          for k in ['bqml_bt_mae_woba', 'bqml_linear_mae_woba']:
+              if k in m:
+                  label = k.replace('bqml_bt_mae_woba', 'BT').replace('bqml_linear_mae_woba', 'Linear')
+                  parts.append(f'{label}: {m[k]:.4f}')
+          print('BQML_BAT=' + (' | '.join(parts) if parts else 'N/A'))
+          parts2 = []
+          for k in ['bqml_bt_mae_xfip', 'bqml_linear_mae_xfip']:
+              if k in m:
+                  label = k.replace('bqml_bt_mae_xfip', 'BT').replace('bqml_linear_mae_xfip', 'Linear')
+                  parts2.append(f'{label}: {m[k]:.4f}')
+          print('BQML_PIT=' + (' | '.join(parts2) if parts2 else 'N/A'))
+          " >> "$GITHUB_OUTPUT"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        continue-on-error: true
+
+      - name: Cleanup GCP credentials
+        if: always()
+        run: rm -f /tmp/gcp-sa-key.json
+
+      - name: Trigger API reload (RPi5)
         run: |
           if [ -n "$API_RELOAD_URL" ]; then
             curl -s -X POST "${API_RELOAD_URL}/model/reload" || echo "Reload skipped (API not reachable)"
@@ -118,23 +159,28 @@ jobs:
         run: |
           BAT_MAE="${{ steps.ensemble.outputs.BAT_MAE }}"
           PIT_MAE="${{ steps.ensemble.outputs.PIT_MAE }}"
+          BQML_BAT="${{ steps.bqml.outputs.BQML_BAT }}"
+          BQML_PIT="${{ steps.bqml.outputs.BQML_PIT }}"
           MEMO="${{ inputs.memo }}"
           curl -s -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"✅ baseball-mlops v8 再学習完了\",
+                \"title\": \"✅ baseball-mlops v9 再学習完了 (GCP統合)\",
                 \"color\": 3066993,
                 \"fields\": [
-                  {\"name\": \"打者 wOBA MAE\", \"value\": \"${BAT_MAE:-計測中}\", \"inline\": false},
-                  {\"name\": \"投手 xFIP MAE\", \"value\": \"${PIT_MAE:-計測中}\", \"inline\": false},
-                  {\"name\": \"モデル構成\", \"value\": \"LGB+Cat+Bayes+Component+Marcel (5-model)\", \"inline\": false},
+                  {\"name\": \"打者 wOBA MAE (Python)\", \"value\": \"${BAT_MAE:-計測中}\", \"inline\": false},
+                  {\"name\": \"投手 xFIP MAE (Python)\", \"value\": \"${PIT_MAE:-計測中}\", \"inline\": false},
+                  {\"name\": \"打者 wOBA MAE (BQML)\", \"value\": \"${BQML_BAT:-N/A}\", \"inline\": false},
+                  {\"name\": \"投手 xFIP MAE (BQML)\", \"value\": \"${BQML_PIT:-N/A}\", \"inline\": false},
+                  {\"name\": \"モデル構成\", \"value\": \"Python 5-model + BQML Boosted Tree + Linear\", \"inline\": false},
+                  {\"name\": \"BigQuery\", \"value\": \"13 raw + 2 pred tables\", \"inline\": true},
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
                   {\"name\": \"トリガー\", \"value\": \"${{ github.event_name }}\", \"inline\": true},
                   {\"name\": \"メモ\", \"value\": \"${MEMO:-cron}\", \"inline\": true},
                   {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
                 ],
-                \"footer\": {\"text\": \"v8: Bat Tracking + Arsenal + CatBoost + PECOTA Components\"}
+                \"footer\": {\"text\": \"v9: GCP BigQuery + BQML + Cloud Run\"}
               }]
             }"
         env:
@@ -149,7 +195,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"❌ baseball-mlops v8 再学習失敗\",
+                \"title\": \"❌ baseball-mlops v9 再学習失敗\",
                 \"color\": 15158332,
                 \"fields\": [
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
@@ -160,4 +206,55 @@ jobs:
             }"
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        continue-on-error: true
+
+  # -------------------------------------------------------
+  # Cloud Run デプロイ（master のみ、retrain 完了後）
+  # ubuntu-latest で gcloud CLI を使用
+  # -------------------------------------------------------
+  deploy-cloudrun:
+    needs: retrain
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/data-platform-490901/baseball-mlops/api:$(date +%Y%m%d)-${{ github.run_number }}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy baseball-mlops-api \
+            --image "${IMAGE}" \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 512Mi \
+            --max-instances 1 \
+            --min-instances 0 \
+            --port 8080 \
+            --set-env-vars "WANDB_API_KEY=${{ secrets.WANDB_API_KEY }},WANDB_ENTITY=${{ secrets.WANDB_ENTITY }}"
+
+      - name: Health check
+        run: |
+          URL=$(gcloud run services describe baseball-mlops-api --region us-central1 --format 'value(status.url)')
+          echo "Cloud Run URL: ${URL}"
+          curl -sf "${URL}/model/info" || echo "Cold start — health check will pass on next ping"
         continue-on-error: true
