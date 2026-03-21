@@ -13,7 +13,7 @@ on:
 jobs:
   retrain:
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 240
+    timeout-minutes: 360
     permissions:
       contents: write
 
@@ -40,7 +40,7 @@ jobs:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Train CatBoost (Optuna 500 trials + recency weight)
+      - name: Train CatBoost (Optuna 200 trials + pruning + recency weight)
         run: python src/train_catboost.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}

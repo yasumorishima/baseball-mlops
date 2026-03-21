@@ -3,7 +3,7 @@ CatBoost 学習 + W&B 記録 (v8)
 
 LightGBM とは異なる分割戦略を持つ CatBoost をアンサンブル多様性のために追加。
 同じ特徴量・CV戦略を使い、OOF予測をスタッキング用に出力する。
-Optuna 500 trials でハイパーパラメータ最適化（LGBの半分: 時間短縮）。
+Optuna 200 trials + MedianPruner でハイパーパラメータ最適化（RPi5で約1h）。
 """
 
 import os
@@ -31,7 +31,7 @@ from train import (
     OPTUNA_TRIALS,
 )
 
-CATBOOST_TRIALS = 500  # LGBの半分（CatBoostは学習が遅い）
+CATBOOST_TRIALS = 200  # LGBの1/5（CatBoostは1trial≒18s、200trials≒1h）
 _EARLY_STOPPING = 50
 RECENCY_DECAY = 0.85
 
@@ -42,17 +42,24 @@ def _recency_weights(seasons: np.ndarray) -> np.ndarray:
 
 
 def _cv_mae_cat(params: dict, X: pd.DataFrame, y: pd.Series,
-                seasons: np.ndarray) -> float:
-    """時系列 CV で OOF MAE を計算"""
+                seasons: np.ndarray,
+                trial: optuna.Trial | None = None) -> float:
+    """時系列 CV で OOF MAE を計算（trial渡しでpruning対応）"""
     splits = _time_cv_splits(seasons)
     weights = _recency_weights(seasons)
     oof = np.full(len(y), np.nan)
-    for tr_idx, va_idx in splits:
+    for fold_i, (tr_idx, va_idx) in enumerate(splits):
         pool_tr = Pool(X.iloc[tr_idx], y.iloc[tr_idx], weight=weights[tr_idx])
         pool_va = Pool(X.iloc[va_idx], y.iloc[va_idx])
         model = CatBoostRegressor(**params, verbose=0)
         model.fit(pool_tr, eval_set=pool_va, early_stopping_rounds=_EARLY_STOPPING)
         oof[va_idx] = model.predict(X.iloc[va_idx])
+        # fold完了ごとに中間MAEを報告→MedianPrunerが劣悪trialを早期打切り
+        if trial is not None:
+            valid_so_far = ~np.isnan(oof)
+            trial.report(float(mean_absolute_error(y[valid_so_far], oof[valid_so_far])), fold_i)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
     valid = ~np.isnan(oof)
     return float(mean_absolute_error(y[valid], oof[valid]))
 
@@ -73,7 +80,7 @@ def tune_catboost(X: pd.DataFrame, y: pd.Series, seasons: np.ndarray,
             "border_count": trial.suggest_int("border_count", 32, 255),
             "random_seed": 42,
         }
-        return _cv_mae_cat(params, X, y, seasons)
+        return _cv_mae_cat(params, X, y, seasons, trial=trial)
 
     sampler = optuna.samplers.TPESampler(n_startup_trials=15, seed=42)
     pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=5)
