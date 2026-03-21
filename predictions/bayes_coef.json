@@ -6,124 +6,134 @@
       "std": 0.0658
     },
     "BB%": {
-      "coef": 0.0038,
+      "coef": 0.0032,
       "mean": 0.0852,
       "std": 0.0331
     },
     "BABIP": {
-      "coef": -0.0014,
+      "coef": -0.0012,
       "mean": 0.2918,
       "std": 0.047
     },
     "brl_percent": {
-      "coef": 0.0023,
+      "coef": 0.0018,
       "mean": 7.8484,
       "std": 3.9003
     },
     "avg_hit_speed": {
-      "coef": 0.0019,
+      "coef": 0.0015,
       "mean": 88.7461,
-      "std": 2.1236
+      "std": 2.1239
     },
     "xwOBA": {
-      "coef": 0.0037,
+      "coef": 0.0036,
       "mean": 0.3148,
       "std": 0.0397
     },
     "sprint_speed": {
-      "coef": 0.0025,
-      "mean": 27.2703,
-      "std": 1.2598
+      "coef": 0.0022,
+      "mean": 27.2704,
+      "std": 1.2599
     },
     "avg_hit_angle": {
       "coef": 0.0017,
-      "mean": 13.2084,
-      "std": 4.5952
+      "mean": 13.2089,
+      "std": 4.5946
     },
     "ev95percent": {
-      "coef": -0.0018,
+      "coef": -0.0008,
       "mean": 38.7727,
       "std": 7.4071
     },
     "HardHit%": {
-      "coef": 0.0035,
+      "coef": 0.0027,
       "mean": 0.385,
       "std": 0.0813
     },
     "Contact%": {
-      "coef": 0.004,
+      "coef": 0.003,
       "mean": 0.7632,
       "std": 0.0626
     },
     "O-Swing%": {
-      "coef": 0.0013,
+      "coef": 0.001,
       "mean": 0.317,
       "std": 0.0627
     },
     "PA": {
-      "coef": 0.0038,
+      "coef": 0.0026,
       "mean": 339.4936,
       "std": 191.5428
     },
     "G": {
-      "coef": -0.0059,
+      "coef": -0.0033,
       "mean": 91.0372,
       "std": 43.8514
     },
     "SwStr%": {
-      "coef": -0.0004,
+      "coef": -0.001,
       "mean": 0.1127,
       "std": 0.0346
     },
     "maxEV": {
-      "coef": 0.0046,
+      "coef": 0.0043,
       "mean": 110.2178,
       "std": 3.1916
     },
-    "lgb_delta": {
-      "coef": 0.0025,
-      "mean": -0.0055,
-      "std": 0.0161
+    "avg_bat_speed": {
+      "coef": -0.0001,
+      "mean": 71.789,
+      "std": 0.8234
     },
-    "age_from_peak": {
-      "coef": 0.0045,
+    "swing_length": {
+      "coef": 0.0018,
+      "mean": -0.0057,
+      "std": 0.017
+    },
+    "squared_up_rate": {
+      "coef": 0.0025,
+      "mean": -0.0044,
+      "std": 0.0148
+    },
+    "pull_percent": {
+      "coef": 0.0033,
       "mean": 0.6805,
       "std": 3.5491
     },
-    "age_sq": {
-      "coef": 0.0003,
+    "oppo_percent": {
+      "coef": 0.0004,
       "mean": 13.0592,
       "std": 19.7816
     },
-    "pa_rate": {
-      "coef": 0.0038,
+    "lgb_delta": {
+      "coef": 0.0026,
       "mean": 0.5223,
       "std": 0.2947
     },
-    "xwoba_luck": {
-      "coef": 0.0026,
+    "cat_delta": {
+      "coef": 0.0024,
       "mean": 0.0023,
       "std": 0.0225
     },
-    "park_factor": {
-      "coef": -0.0005,
+    "age_from_peak": {
+      "coef": -0.0004,
       "mean": 99.8679,
       "std": 3.5787
     },
-    "team_changed": {
+    "age_sq": {
       "coef": -0.0007,
       "mean": 0.2182,
       "std": 0.413
     },
-    "g_change_rate": {
-      "coef": -0.001,
+    "pa_rate": {
+      "coef": -0.0011,
       "mean": 1.3112,
       "std": 1.0529
     }
   },
   "pitcher": {
     "K%": {
-      "coef": -0.0631,
+      "coef": -0.0454,
       "mean": 0.239,
       "std": 0.0553
     },
@@ -133,7 +143,7 @@
       "std": 0.0262
     },
     "BABIP": {
-      "coef": -0.023,
+      "coef": -0.0201,
       "mean": 0.2869,
       "std": 0.0372
     },
@@ -144,8 +154,8 @@
     },
     "avg_hit_speed": {
       "coef": -0.0,
-      "mean": 88.5595,
-      "std": 1.5529
+      "mean": 88.5596,
+      "std": 1.5528
     },
     "est_woba": {
       "coef": -0.0,
@@ -153,9 +163,9 @@
       "std": 0.0315
     },
     "avg_hit_angle": {
-      "coef": 0.0738,
-      "mean": 12.5686,
-      "std": 5.373
+      "coef": 0.0645,
+      "mean": 12.5683,
+      "std": 5.3734
     },
     "ev95percent": {
       "coef": -0.0,
@@ -173,12 +183,12 @@
       "std": 0.0589
     },
     "CSW%": {
-      "coef": -0.0181,
+      "coef": -0.0092,
       "mean": 0.2807,
       "std": 0.0263
     },
     "IP": {
-      "coef": 0.0033,
+      "coef": 0.0043,
       "mean": 87.055,
       "std": 48.0127
     },
@@ -188,12 +198,12 @@
       "std": 19.3294
     },
     "SwStr%": {
-      "coef": -0.0346,
+      "coef": -0.0188,
       "mean": 0.1156,
       "std": 0.0253
     },
     "Stuff+": {
-      "coef": -0.0279,
+      "coef": -0.029,
       "mean": 101.8984,
       "std": 9.5028
     },
@@ -203,14 +213,39 @@
       "std": 5.8234
     },
     "Pitching+": {
-      "coef": -0.0892,
+      "coef": -0.0912,
       "mean": 102.1193,
       "std": 9.1238
     },
+    "n_pitch_types": {
+      "coef": -0.0,
+      "mean": 3.4126,
+      "std": 1.0986
+    },
+    "best_whiff": {
+      "coef": -0.0165,
+      "mean": 36.6051,
+      "std": 7.4983
+    },
+    "avg_whiff_weighted": {
+      "coef": -0.0,
+      "mean": 26.0449,
+      "std": 4.8617
+    },
+    "usage_entropy": {
+      "coef": 0.0,
+      "mean": 0.0,
+      "std": 1.0
+    },
     "lgb_delta": {
-      "coef": 0.0146,
-      "mean": -0.0047,
-      "std": 0.2463
+      "coef": 0.0,
+      "mean": -0.0245,
+      "std": 0.2312
+    },
+    "cat_delta": {
+      "coef": 0.0516,
+      "mean": -0.0448,
+      "std": 0.2263
     },
     "age_from_peak": {
       "coef": 0.0088,
@@ -223,7 +258,7 @@
       "std": 25.0047
     },
     "ip_rate": {
-      "coef": 0.0036,
+      "coef": 0.0046,
       "mean": 0.4353,
       "std": 0.2401
     },
@@ -233,7 +268,7 @@
       "std": 3.5796
     },
     "team_changed": {
-      "coef": 0.0007,
+      "coef": 0.0,
       "mean": 0.2038,
       "std": 0.4028
     },
