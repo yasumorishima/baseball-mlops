@@ -234,58 +234,34 @@ def run_catboost_training():
 
 
 def _update_catboost_predictions(model, full_df, feat_cols, target_name, kind):
-    """CatBoost predictions を CSV に追記"""
+    """CatBoost predictions を CSV に追記（train.pyの_predict_next_seasonを再利用）"""
     pred_path = PRED_DIR / f"{kind}_predictions.csv"
     if not pred_path.exists():
         return
+
     preds = pd.read_csv(pred_path)
     col_name = f"cat_{target_name}"
 
     latest_season = full_df["season"].max()
-    next_year = latest_season + 1
+    latest_df = full_df[full_df["season"] == latest_season]
 
-    cat_preds = []
-    for _, row in preds.iterrows():
-        player = row["player"]
-        season_last = int(row.get("season_last", latest_season))
-        feats = {}
+    if kind == "batter":
+        target_col, avg_val = "wOBA", MLB_AVG_WOBA
+        marcel_fn, delta_fn = marcel_woba, _bat_delta_features
+    else:
+        target_col, avg_val = "xFIP", MLB_AVG_XFIP
+        marcel_fn, delta_fn = marcel_xfip, _pit_delta_features
 
-        from train import BATTER_FEATURES, PITCHER_FEATURES, _get_park_factors
-        BASE_FEATURES = BATTER_FEATURES if kind == "batter" else PITCHER_FEATURES
-        delta_fn = _bat_delta_features if kind == "batter" else _pit_delta_features
-        pf = _get_park_factors()
+    cat_df = _predict_next_season(
+        model, full_df, latest_df, feat_cols,
+        target_col, col_name, marcel_fn, avg_val,
+        delta_fn=delta_fn,
+    )
 
-        teams_by_lag = {}
-        for lag in range(1, 4):
-            y = next_year - 1 - lag
-            prev = full_df[(full_df["player"] == player) & (full_df["season"] == y)]
-            suffix = f"_y{lag}"
-            if lag == 1:
-                cur = full_df[(full_df["player"] == player) & (full_df["season"] == season_last)]
-                if len(cur) > 0:
-                    for f in BASE_FEATURES:
-                        feats[f"_y1"] = cur.iloc[0].get(f, np.nan)
-                    teams_by_lag[1] = str(cur.iloc[0].get("Team", ""))
-                if len(prev) > 0:
-                    teams_by_lag[2] = str(prev.iloc[0].get("Team", ""))
-            for f in [c for c in feat_cols if c.endswith(suffix)]:
-                base = f.replace(suffix, "")
-                feats[f] = prev.iloc[0].get(base, np.nan) if len(prev) > 0 else np.nan
-            if len(prev) > 0:
-                teams_by_lag[lag] = str(prev.iloc[0].get("Team", ""))
-
-        # Build feature vector using same columns as training
-        feat_df = pd.DataFrame([feats])[feat_cols].apply(pd.to_numeric, errors="coerce") if all(c in feats for c in feat_cols[:3]) else None
-
-        if feat_df is not None:
-            try:
-                cat_preds.append(round(float(model.predict(feat_df)[0]), 3))
-            except Exception:
-                cat_preds.append(np.nan)
-        else:
-            cat_preds.append(np.nan)
-
-    preds[col_name] = cat_preds
+    # 既存の predictions CSV に CatBoost 列をマージ
+    if col_name in preds.columns:
+        preds = preds.drop(columns=[col_name])
+    preds = preds.merge(cat_df[["player", col_name]], on="player", how="left")
     preds.to_csv(pred_path, index=False)
     print(f"  {kind} CatBoost predictions updated: {pred_path}")
 
