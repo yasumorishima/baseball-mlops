@@ -98,7 +98,7 @@ jobs:
             --image "${IMAGE}" \
             --region us-central1 \
             --platform managed \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --memory 512Mi \
             --max-instances 1 \
             --min-instances 0 \
