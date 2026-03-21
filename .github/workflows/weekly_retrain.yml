@@ -233,7 +233,7 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          IMAGE="us-central1-docker.pkg.dev/data-platform-490901/baseball-mlops/api:$(date +%Y%m%d)-${{ github.run_number }}"
+          IMAGE="us-central1-docker.pkg.dev/data-platform-490901/apis/baseball-mlops-api:$(date +%Y%m%d)-${{ github.run_number }}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
           docker build -t "${IMAGE}" .
           docker push "${IMAGE}"
