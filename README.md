@@ -90,6 +90,8 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 
 ### GCP 分析基盤（v9）
 
+> **開発経緯の注記**: 通常の実務フローでは BQML（SQL）でプロトタイプ → Python で本番化という順序ですが、本プロジェクトは GCP 未使用の状態で開発を始めたため Python 本番モデル（LightGBM/CatBoost 等 5モデルアンサンブル）が先に充実しました。現在は逆方向に、BQML の精度を Python 版に揃えていく段階です。
+
 ```
 [GitHub Actions — 毎週月曜 JST 11:00]
   ↓ fetch_statcast.py      pybaseball / savant-extras →
