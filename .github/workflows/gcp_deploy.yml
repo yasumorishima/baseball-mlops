@@ -1,0 +1,145 @@
+name: GCP Deploy (BigQuery + Cloud Run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'この実行の意図'
+        required: true
+        type: string
+      deploy_cloudrun:
+        description: 'Cloud Run にデプロイするか'
+        required: false
+        default: true
+        type: boolean
+      load_bigquery:
+        description: 'BigQuery にデータロードするか'
+        required: false
+        default: true
+        type: boolean
+      train_bqml:
+        description: 'BigQuery ML モデルを学習するか'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  # -------------------------------------------------------
+  # Job 1: BigQuery データロード + BQML 学習
+  # self-hosted ARM64 で実行（data/raw CSV がある環境）
+  # -------------------------------------------------------
+  bigquery:
+    if: inputs.load_bigquery || inputs.train_bqml
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup GCP credentials
+        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
+
+      - name: Load data to BigQuery
+        if: inputs.load_bigquery
+        run: python src/load_to_bq.py --all --metrics
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+
+      - name: Train BQML models
+        if: inputs.train_bqml
+        run: python src/bqml_train.py --all
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f /tmp/gcp-sa-key.json
+
+  # -------------------------------------------------------
+  # Job 2: Cloud Run デプロイ
+  # ubuntu-latest で実行（gcloud CLI + Docker build に x86_64 が必要）
+  # -------------------------------------------------------
+  cloudrun-deploy:
+    if: inputs.deploy_cloudrun
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/data-platform-490901/baseball-mlops/api:$(date +%Y%m%d)-${{ github.run_number }}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy baseball-mlops-api \
+            --image "${IMAGE}" \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 512Mi \
+            --max-instances 1 \
+            --min-instances 0 \
+            --port 8080 \
+            --set-env-vars "WANDB_API_KEY=${{ secrets.WANDB_API_KEY }},WANDB_ENTITY=${{ secrets.WANDB_ENTITY }}"
+
+      - name: Get Cloud Run URL
+        id: url
+        run: |
+          URL=$(gcloud run services describe baseball-mlops-api --region us-central1 --format 'value(status.url)')
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Cloud Run URL: ${URL}"
+
+      - name: Health check
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+          echo "Checking ${URL}/model/info ..."
+          curl -sf "${URL}/model/info" || echo "Health check failed (cold start may take a moment)"
+
+      - name: Notify Discord
+        if: always()
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+          STATUS="${{ job.status }}"
+          MEMO="${{ inputs.memo }}"
+          COLOR=$([[ "$STATUS" == "success" ]] && echo 3066993 || echo 15158332)
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"Cloud Run Deploy: ${STATUS}\",
+                \"color\": ${COLOR},
+                \"fields\": [
+                  {\"name\": \"URL\", \"value\": \"${URL:-N/A}\", \"inline\": false},
+                  {\"name\": \"Image\", \"value\": \"${IMAGE}\", \"inline\": false},
+                  {\"name\": \"Memo\", \"value\": \"${MEMO}\", \"inline\": true},
+                  {\"name\": \"Run\", \"value\": \"[Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": true}
+                ]
+              }]
+            }"
+        env:
+          IMAGE: ${{ env.IMAGE }}
+        continue-on-error: true
