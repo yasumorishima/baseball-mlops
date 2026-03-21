@@ -134,27 +134,10 @@ ORDER BY season DESC, pf_5yr DESC;
 -- ============================================================
 -- 6. BQML vs Python 全モデル精度比較ダッシュボード
 -- ============================================================
+-- model_metrics_history は append 運用のため、初回 Run で列が未定義の場合がある。
+-- SELECT * で全列を取得し、カラム追加に自動対応する。
 CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_model_comparison` AS
-SELECT
-  run_date,
-  run_timestamp,
-  -- Python models
-  lgb_mae_woba,
-  cat_mae_woba,
-  bayes_mae_woba,
-  component_mae_woba,
-  marcel_mae_woba,
-  -- BQML models (追加時に列が自動拡張)
-  bqml_bt_mae_woba,
-  bqml_linear_mae_woba,
-  bqml_bt_mae_xfip,
-  bqml_linear_mae_xfip,
-  -- Python models (投手)
-  lgb_mae_xfip,
-  cat_mae_xfip,
-  bayes_mae_xfip,
-  component_mae_xfip,
-  marcel_mae_xfip
+SELECT *
 FROM `data-platform-490901.mlb_statcast.model_metrics_history`
 ORDER BY run_date DESC;
 

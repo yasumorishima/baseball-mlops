@@ -54,16 +54,25 @@ PRED_TABLE_MAP = {
 
 
 def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """BQ 非互換カラム名を修正する（% → _pct、特殊文字除去）"""
+    """BQ 非互換カラム名を修正する（% → _pct、特殊文字除去）
+
+    BigQuery カラム名に使えるのは英数字・アンダースコアのみ。
+    """
+    import re
+
     rename = {}
     for col in df.columns:
         new = col
-        # BQ では % はカラム名に使えない
+        # 意味のある置換を先に行う
         new = new.replace("%", "_pct")
         new = new.replace("/", "_per_")
         new = new.replace("+", "_plus")
-        new = new.replace("-", "_")
-        new = new.replace(" ", "_")
+        # 残りの非互換文字（括弧、ハイフン、スペース、ドット、#等）をアンダースコアに
+        new = re.sub(r"[^a-zA-Z0-9_]", "_", new)
+        # 連続アンダースコアを1つに
+        new = re.sub(r"_+", "_", new)
+        # 末尾アンダースコアを除去
+        new = new.strip("_")
         # 先頭が数字の場合は _ を付加
         if new and new[0].isdigit():
             new = f"_{new}"
@@ -108,8 +117,12 @@ def load_csv_to_bq(
         autodetect=True,
     )
 
-    job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
-    job.result()  # 完了を待機
+    try:
+        job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
+        job.result()  # 完了を待機
+    except Exception as e:
+        print(f"  ERROR: {table_name} ← {csv_path.name}: {e}")
+        return 0
 
     table = client.get_table(table_id)
     print(f"  OK: {table_name} ← {csv_path.name} ({table.num_rows} rows)")
