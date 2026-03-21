@@ -173,6 +173,21 @@ develop ─→  baseball-mlops-dev.streamlit.app  （開発・検証）
 
 ---
 
+## BigQuery Data
+
+Prediction results and backtest metrics are available on BigQuery (free tier, no cost).
+
+| Item | Value |
+|---|---|
+| Project | `data-platform-490901` |
+| Dataset | `mlb_statcast` |
+| Total rows | 1,096 |
+
+**Tables**:
+`batter_predictions` / `pitcher_predictions` / `backtest_outliers_batter` / `backtest_outliers_pitcher` / `backtest_yearly_mae_batter` / `backtest_yearly_mae_pitcher`
+
+---
+
 ## API エンドポイント
 
 | Endpoint | 説明 |
