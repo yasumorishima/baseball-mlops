@@ -140,7 +140,7 @@ def fetch_sprint_speed(start: int = START_SEASON, end: int = END_SEASON) -> pd.D
 
 
 def fetch_bat_tracking(start: int = 2024, end: int = END_SEASON) -> pd.DataFrame:
-    """Statcast bat tracking (Hawk-Eye, 2024+): bat_speed, swing_length, squared_up等"""
+    """Statcast bat tracking (Hawk-Eye, 2024+): bat_speed, swing_tilt, attack_angle等"""
     print(f"Statcast bat tracking {start}-{end} ...")
     from savant_extras import bat_tracking
     frames = []
@@ -293,8 +293,8 @@ def build_batter_features() -> pd.DataFrame:
         bt = pd.read_csv(bt_path)
         bt = _sc_player_col(bt)
         bt_cols = ["player", "season"] + [c for c in bt.columns
-                   if c in ("avg_bat_speed", "swing_length", "squared_up_rate",
-                            "blast_rate", "fast_swing_rate", "swords_rate")]
+                   if c in ("avg_bat_speed", "swing_tilt", "attack_angle",
+                            "ideal_attack_angle_rate", "competitive_swings")]
         bt_cols = [c for c in bt_cols if c in bt.columns]
         if len(bt_cols) > 2:
             sc = sc.merge(bt[bt_cols], on=["player", "season"], how="left")
@@ -305,7 +305,7 @@ def build_batter_features() -> pd.DataFrame:
         bb = pd.read_csv(bb_path)
         bb = _sc_player_col(bb)
         bb_cols = ["player", "season"] + [c for c in bb.columns
-                   if c in ("pull_percent", "oppo_percent", "pull_rate", "oppo_rate")]
+                   if c in ("pull_rate", "oppo_rate")]
         bb_cols = [c for c in bb_cols if c in bb.columns]
         if len(bb_cols) > 2:
             sc = sc.merge(bb[bb_cols], on=["player", "season"], how="left")
@@ -358,7 +358,7 @@ def build_pitcher_features() -> pd.DataFrame:
     exp = _sc_player_col(exp)
 
     exp_cols = ["player", "season"] + [
-        c for c in ("est_ba", "est_slg", "est_woba", "est_era")
+        c for c in ("est_ba", "est_slg", "est_woba", "xera")
         if c in exp.columns
     ]
     sc = ev.merge(exp[exp_cols], on=["player", "season"], how="left")

@@ -79,9 +79,10 @@ _BAT_RAW = [
     # FanGraphs
     "HardHit%", "Contact%", "O-Swing%", "PA", "G", "SwStr%", "maxEV",
     # v8: Bat Tracking (2024+ only, SimpleImputer handles NaN)
-    "avg_bat_speed", "swing_length", "squared_up_rate",
+    "avg_bat_speed", "swing_tilt", "attack_angle",
+    "ideal_attack_angle_rate",
     # v8: Batted ball direction
-    "pull_percent", "oppo_percent",
+    "pull_rate", "oppo_rate",
     # スタッキング特徴量: LightGBM + CatBoost OOF delta
     "lgb_delta",
     "cat_delta",  # v8: CatBoost stacking

@@ -16,7 +16,7 @@ WITH base AS (
     xFIP, FIP, ERA, `K_pct`, `BB_pct`, `HR_per_9`, WHIP, BABIP, `LOB_pct`,
     `SwStr_pct`, `K_BB_pct`, `CSW_pct`, G,
     -- Statcast expected
-    est_ba, est_slg, est_woba, est_era,
+    est_ba, est_slg, est_woba, xera,
     -- Statcast exit velo (被打球)
     avg_hit_speed, avg_hit_angle, brl_percent, ev95percent,
     -- Arsenal (集約済み)
@@ -48,7 +48,7 @@ lagged AS (
     LAG(est_ba, 1) OVER w AS est_ba_y1,
     LAG(est_slg, 1) OVER w AS est_slg_y1,
     LAG(est_woba, 1) OVER w AS est_woba_y1,
-    LAG(est_era, 1) OVER w AS est_era_y1,
+    LAG(xera, 1) OVER w AS xera_y1,
     LAG(avg_hit_speed, 1) OVER w AS avg_hit_speed_y1,
     LAG(avg_hit_angle, 1) OVER w AS avg_hit_angle_y1,
     LAG(brl_percent, 1) OVER w AS brl_percent_y1,
@@ -141,7 +141,7 @@ SELECT
   xFIP_y1, FIP_y1, ERA_y1, K_pct_y1, BB_pct_y1, HR_per_9_y1,
   WHIP_y1, BABIP_y1, LOB_pct_y1,
   SwStr_pct_y1, K_BB_pct_y1, CSW_pct_y1, G_y1,
-  est_ba_y1, est_slg_y1, est_woba_y1, est_era_y1,
+  est_ba_y1, est_slg_y1, est_woba_y1, xera_y1,
   avg_hit_speed_y1, avg_hit_angle_y1, brl_percent_y1, ev95percent_y1,
   n_pitch_types_y1, primary_usage_y1, best_whiff_y1,
   avg_whiff_weighted_y1, best_rv100_y1, usage_entropy_y1,

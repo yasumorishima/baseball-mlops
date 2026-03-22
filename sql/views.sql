@@ -16,7 +16,7 @@ SELECT
   brl_percent,
   sprint_speed,
   avg_bat_speed,
-  swing_length,
+  swing_tilt,
   PA,
   Age,
   Team,
@@ -64,30 +64,24 @@ ORDER BY player, season;
 -- ============================================================
 CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batted_ball_leaders` AS
 SELECT
-  b.player,
-  b.season,
-  b.avg_hit_speed,
-  b.brl_percent,
-  b.ev95percent,
-  b.anglesweetspotpercent,
-  bb.pull_percent,
-  bb.oppo_percent,
-  bt.avg_bat_speed,
-  bt.swing_length,
-  bt.squared_up_rate,
-  bt.blast_rate,
-  bt.fast_swing_rate,
-  f.wOBA,
-  f.xwOBA,
-  f.PA
-FROM `data-platform-490901.mlb_statcast.raw_sc_batter_exitvelo` b
-LEFT JOIN `data-platform-490901.mlb_statcast.raw_sc_batted_ball` bb
-  ON b.player = bb.player AND b.season = bb.season
-LEFT JOIN `data-platform-490901.mlb_statcast.raw_sc_bat_tracking` bt
-  ON b.player = bt.player AND b.season = bt.season
-LEFT JOIN `data-platform-490901.mlb_statcast.raw_fg_batting` f
-  ON b.player = f.player AND b.season = f.season
-ORDER BY b.avg_hit_speed DESC;
+  player,
+  season,
+  avg_hit_speed,
+  brl_percent,
+  ev95percent,
+  anglesweetspotpercent,
+  pull_rate,
+  oppo_rate,
+  avg_bat_speed,
+  swing_tilt,
+  attack_angle,
+  ideal_attack_angle_rate,
+  wOBA,
+  xwOBA,
+  PA
+FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+WHERE PA >= 100
+ORDER BY avg_hit_speed DESC;
 
 
 -- ============================================================
@@ -151,7 +145,7 @@ SELECT
   COUNT(DISTINCT player) AS n_batters,
   AVG(PA) AS avg_pa,
   COUNT(DISTINCT CASE WHEN avg_bat_speed IS NOT NULL THEN player END) AS n_bat_tracking,
-  COUNT(DISTINCT CASE WHEN pull_percent IS NOT NULL THEN player END) AS n_batted_ball
+  COUNT(DISTINCT CASE WHEN pull_rate IS NOT NULL THEN player END) AS n_batted_ball
 FROM `data-platform-490901.mlb_statcast.raw_batter_features`
 GROUP BY season
 ORDER BY season;

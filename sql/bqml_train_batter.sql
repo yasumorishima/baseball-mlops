@@ -23,9 +23,9 @@ WITH base AS (
     -- Sprint speed
     sprint_speed,
     -- Bat Tracking (2024+, NULL for earlier)
-    avg_bat_speed, swing_length, squared_up_rate, blast_rate, fast_swing_rate,
+    avg_bat_speed, swing_tilt, attack_angle, ideal_attack_angle_rate,
     -- Batted ball direction
-    pull_percent, oppo_percent,
+    pull_rate, oppo_rate,
     -- Basic
     Age, PA, Team
   FROM `data-platform-490901.mlb_statcast.raw_batter_features`
@@ -59,12 +59,11 @@ lagged AS (
     LAG(anglesweetspotpercent, 1) OVER w AS anglesweetspotpercent_y1,
     LAG(sprint_speed, 1) OVER w AS sprint_speed_y1,
     LAG(avg_bat_speed, 1) OVER w AS avg_bat_speed_y1,
-    LAG(swing_length, 1) OVER w AS swing_length_y1,
-    LAG(squared_up_rate, 1) OVER w AS squared_up_rate_y1,
-    LAG(blast_rate, 1) OVER w AS blast_rate_y1,
-    LAG(fast_swing_rate, 1) OVER w AS fast_swing_rate_y1,
-    LAG(pull_percent, 1) OVER w AS pull_percent_y1,
-    LAG(oppo_percent, 1) OVER w AS oppo_percent_y1,
+    LAG(swing_tilt, 1) OVER w AS swing_tilt_y1,
+    LAG(attack_angle, 1) OVER w AS attack_angle_y1,
+    LAG(ideal_attack_angle_rate, 1) OVER w AS ideal_attack_angle_rate_y1,
+    LAG(pull_rate, 1) OVER w AS pull_rate_y1,
+    LAG(oppo_rate, 1) OVER w AS oppo_rate_y1,
     LAG(Age, 1) OVER w AS Age_y1,
     LAG(PA, 1) OVER w AS PA_y1,
 
@@ -76,6 +75,7 @@ lagged AS (
     LAG(avg_hit_speed, 2) OVER w AS avg_hit_speed_y2,
     LAG(brl_percent, 2) OVER w AS brl_percent_y2,
     LAG(avg_bat_speed, 2) OVER w AS avg_bat_speed_y2,
+    LAG(swing_tilt, 2) OVER w AS swing_tilt_y2,
 
     -- ===== y3 (3年前) =====
     LAG(wOBA, 3) OVER w AS wOBA_y3,
@@ -154,12 +154,12 @@ SELECT
   est_ba_y1, est_slg_y1, est_woba_y1,
   avg_hit_speed_y1, avg_hit_angle_y1, brl_percent_y1, ev95percent_y1, anglesweetspotpercent_y1,
   sprint_speed_y1,
-  avg_bat_speed_y1, swing_length_y1, squared_up_rate_y1, blast_rate_y1, fast_swing_rate_y1,
-  pull_percent_y1, oppo_percent_y1,
+  avg_bat_speed_y1, swing_tilt_y1, attack_angle_y1, ideal_attack_angle_rate_y1,
+  pull_rate_y1, oppo_rate_y1,
   Age_y1, PA_y1,
   -- y2 features
   wOBA_y2, xwOBA_y2, K_pct_y2, BB_pct_y2,
-  avg_hit_speed_y2, brl_percent_y2, avg_bat_speed_y2,
+  avg_hit_speed_y2, brl_percent_y2, avg_bat_speed_y2, swing_tilt_y2,
   -- y3 features
   wOBA_y3,
   -- delta features
@@ -190,7 +190,7 @@ OPTIONS(
 SELECT
   wOBA_y1, xwOBA_y1, K_pct_y1, BB_pct_y1, ISO_y1, BABIP_y1,
   avg_hit_speed_y1, brl_percent_y1, sprint_speed_y1,
-  avg_bat_speed_y1, swing_length_y1,
+  avg_bat_speed_y1, swing_tilt_y1,
   Age_y1, PA_y1,
   wOBA_delta_1, age_from_peak, age_sq, pa_rate, xwoba_luck, team_changed,
   target_woba,

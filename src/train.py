@@ -118,10 +118,10 @@ BATTER_FEATURES = [
     # Statcast sprint speed
     "sprint_speed",
     # v8: Bat Tracking (2024+ only, NaN for earlier years — LightGBM handles natively)
-    "avg_bat_speed", "swing_length", "squared_up_rate",
-    "blast_rate", "fast_swing_rate",
+    "avg_bat_speed", "swing_tilt", "attack_angle",
+    "ideal_attack_angle_rate",
     # v8: Batted ball direction
-    "pull_percent", "oppo_percent",
+    "pull_rate", "oppo_rate",
     # 基本情報
     "Age", "PA",
 ]
@@ -132,7 +132,7 @@ PITCHER_FEATURES = [
     # FanGraphs (追加 v5)
     "SwStr%", "K-BB%", "CSW%", "G",
     # Statcast expected stats
-    "est_ba", "est_slg", "est_woba", "est_era",
+    "est_ba", "est_slg", "est_woba", "xera",
     # Statcast exit velo (被打球)
     "avg_hit_speed", "avg_hit_angle", "brl_percent", "ev95percent",
     # v8: Pitch-level arsenal features (aggregated per pitcher)
