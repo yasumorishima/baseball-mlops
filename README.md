@@ -176,8 +176,8 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 |---|---|---|
 | Statcast | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/avg_hit_angle/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/avg_hit_angle/ev95percent |
 | FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G | K-BB%/CSW%/SwStr%/G/IP |
-| **Bat Tracking (v8)** | **avg_bat_speed/swing_length/squared_up_rate/blast_rate/fast_swing_rate** | — |
-| **Batted Ball (v8)** | **pull_percent/oppo_percent** | — |
+| **Bat Tracking (v8)** | **avg_bat_speed/swing_tilt/attack_angle/ideal_attack_angle_rate** | — |
+| **Batted Ball (v8)** | **pull_rate/oppo_rate** | — |
 | **Arsenal (v8)** | — | **n_pitch_types/primary_usage/best_whiff/avg_whiff_weighted/best_rv100/usage_entropy** |
 | Lag delta | wOBA_delta_1/wOBA_delta_2/xwOBA_delta_1/bat_speed_delta_1 | xFIP_delta_1/xFIP_delta_2/whiff_delta_1/usage_entropy_delta_1 |
 | Interaction | age_x_luck（Age × xwOBA-wOBA乖離） | age_x_kbb（Age × K-BB%） |
@@ -230,8 +230,8 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 | `raw_sc_batter_exitvelo` | Statcast | 打球速度・バレル率 |
 | `raw_sc_batter_expected` | Statcast | 打者期待値 (xBA/xSLG/xwOBA) |
 | `raw_sc_sprint_speed` | Statcast | スプリント速度 |
-| `raw_sc_batted_ball` | Statcast | 打球方向 (pull/oppo %) |
-| `raw_sc_bat_tracking` | Hawk-Eye | バット追跡 (bat speed/swing length 等) |
+| `raw_sc_batted_ball` | Statcast | 打球方向 (pull/oppo rate) |
+| `raw_sc_bat_tracking` | Hawk-Eye | バット追跡 (bat speed/swing tilt/attack angle 等) |
 | `raw_sc_pitcher_exitvelo` | Statcast | 被打球速度 |
 | `raw_sc_pitcher_expected` | Statcast | 投手期待値 |
 | `raw_sc_pitcher_arsenal` | Statcast | 球種別統計 |
