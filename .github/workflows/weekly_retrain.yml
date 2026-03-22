@@ -34,12 +34,12 @@ jobs:
         env:
           PYBASEBALL_CACHE: "1"
 
-      - name: Setup GCP credentials (for pre-validation)
+      - name: Setup GCP credentials
         run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
         continue-on-error: true
 
-      - name: Validate BQ compatibility (fail-fast before training)
-        run: python src/load_to_bq.py --validate
+      - name: Load raw data to BigQuery (early, before training)
+        run: python src/load_to_bq.py --raw
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
         continue-on-error: true
@@ -95,8 +95,8 @@ jobs:
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
       # === GCP BigQuery + BQML ===
-      - name: Load all data to BigQuery
-        run: python src/load_to_bq.py --all --metrics
+      - name: Load predictions + metrics to BigQuery
+        run: python src/load_to_bq.py --predictions --metrics
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
         continue-on-error: true
