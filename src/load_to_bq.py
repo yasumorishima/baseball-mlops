@@ -221,6 +221,72 @@ def append_metrics() -> None:
     print(f"  OK: model_metrics_history appended (total {table.num_rows} rows)")
 
 
+def validate_bq_compat() -> bool:
+    """学習前にCSVのBQ互換性を検証する（カラム名・型・重複）
+
+    Returns:
+        True: 全CSV OK, False: 問題あり（学習を中断すべき）
+    """
+    import re
+
+    print("=== Pre-training BQ compatibility check ===")
+    errors = []
+
+    for csv_name, table_name in {**RAW_TABLE_MAP, **PRED_TABLE_MAP}.items():
+        if csv_name in RAW_TABLE_MAP:
+            csv_path = RAW_DIR / csv_name
+        else:
+            csv_path = PRED_DIR / csv_name
+
+        if not csv_path.exists():
+            # predictions は学習後に生成されるのでスキップ
+            if csv_name in PRED_TABLE_MAP:
+                continue
+            print(f"  WARN: {csv_name} not found (will be skipped)")
+            continue
+
+        df = pd.read_csv(csv_path, nrows=5)  # ヘッダーと型だけ確認
+        sanitized = _sanitize_columns(df)
+
+        # 重複カラムチェック
+        dupes = sanitized.columns[sanitized.columns.duplicated()].tolist()
+        if dupes:
+            errors.append(f"{table_name}: duplicate columns after sanitize: {dupes}")
+
+        # 空カラム名チェック
+        empty_cols = [c for c in sanitized.columns if not c or c.isspace()]
+        if empty_cols:
+            errors.append(f"{table_name}: empty column names found")
+
+        # pyarrow 変換テスト
+        try:
+            import pyarrow as pa
+            pa.Table.from_pandas(sanitized)
+        except Exception as e:
+            errors.append(f"{table_name}: pyarrow conversion failed: {e!r}")
+
+        print(f"  OK: {table_name} ({len(sanitized.columns)} cols)")
+
+    # metrics_history スキーマ互換チェック
+    try:
+        client = _get_client()
+        table_id = f"{FULL_DATASET}.model_metrics_history"
+        table = client.get_table(table_id)
+        existing_cols = {f.name for f in table.schema}
+        print(f"  OK: model_metrics_history schema ({len(existing_cols)} cols)")
+    except Exception:
+        print("  WARN: model_metrics_history not found (will be created)")
+
+    if errors:
+        print(f"\n  FAIL: {len(errors)} error(s) found:")
+        for err in errors:
+            print(f"    - {err}")
+        return False
+
+    print("\n  All checks passed.")
+    return True
+
+
 def print_summary(results: dict) -> None:
     """ロード結果のサマリーを出力"""
     loaded = {k: v for k, v in results.items() if v > 0}
@@ -240,7 +306,13 @@ def main():
     parser.add_argument("--raw", action="store_true", help="Load raw data only")
     parser.add_argument("--predictions", action="store_true", help="Load predictions only")
     parser.add_argument("--metrics", action="store_true", help="Append model metrics history")
+    parser.add_argument("--validate", action="store_true", help="Pre-training BQ compatibility check")
     args = parser.parse_args()
+
+    # バリデーションモード
+    if args.validate:
+        ok = validate_bq_compat()
+        sys.exit(0 if ok else 1)
 
     # デフォルト: 引数なしなら全テーブル
     if not any([args.table, args.all, args.raw, args.predictions, args.metrics]):

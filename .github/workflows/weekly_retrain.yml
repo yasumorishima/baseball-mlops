@@ -34,6 +34,16 @@ jobs:
         env:
           PYBASEBALL_CACHE: "1"
 
+      - name: Setup GCP credentials (for pre-validation)
+        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
+        continue-on-error: true
+
+      - name: Validate BQ compatibility (fail-fast before training)
+        run: python src/load_to_bq.py --validate
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        continue-on-error: true
+
       - name: Train LightGBM (Optuna 1000 trials + recency weight)
         run: python src/train.py
         env:
@@ -85,10 +95,6 @@ jobs:
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
       # === GCP BigQuery + BQML ===
-      - name: Setup GCP credentials
-        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
-        continue-on-error: true
-
       - name: Load all data to BigQuery
         run: python src/load_to_bq.py --all --metrics
         env:
