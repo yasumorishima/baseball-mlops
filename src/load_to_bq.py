@@ -83,16 +83,18 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
         df = df.rename(columns=rename)
 
     # 重複カラム名を検出して連番サフィックスで解消
+    # BQ はカラム名が case-insensitive なので小文字で比較する
     seen: dict[str, int] = {}
     new_cols = []
     for col in df.columns:
-        if col in seen:
-            seen[col] += 1
-            deduped = f"{col}_{seen[col]}"
+        key = col.lower()
+        if key in seen:
+            seen[key] += 1
+            deduped = f"{col}_{seen[key]}"
             print(f"    WARN: duplicate column '{col}' → '{deduped}'")
             new_cols.append(deduped)
         else:
-            seen[col] = 0
+            seen[key] = 0
             new_cols.append(col)
     if new_cols != list(df.columns):
         df.columns = new_cols
@@ -248,8 +250,9 @@ def validate_bq_compat() -> bool:
         df = pd.read_csv(csv_path, nrows=5)  # ヘッダーと型だけ確認
         sanitized = _sanitize_columns(df)
 
-        # 重複カラムチェック
-        dupes = sanitized.columns[sanitized.columns.duplicated()].tolist()
+        # 重複カラムチェック（BQ は case-insensitive）
+        lower_cols = sanitized.columns.str.lower()
+        dupes = sanitized.columns[lower_cols.duplicated()].tolist()
         if dupes:
             errors.append(f"{table_name}: duplicate columns after sanitize: {dupes}")
 
