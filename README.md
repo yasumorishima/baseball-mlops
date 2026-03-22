@@ -26,11 +26,11 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 
 | | Marcel 法 | LightGBM | CatBoost | Bayes (ElasticNet) | Component (PECOTA) | Ensemble |
 |---|---|---|---|---|---|---|
-| 打者 wOBA MAE | 0.0326 | 0.0294 | TBD | **0.0287** | TBD | 逆MAE重み付き |
-| 投手 xFIP MAE | 0.5576 | 0.5317 | TBD | **0.4830** | TBD | 逆MAE重み付き |
+| 打者 wOBA MAE | 0.0326 | 0.0295 | 0.0295 | **0.0287** | 0.0445 | 逆MAE重み付き |
+| 投手 xFIP MAE | 0.5576 | 0.5326 | 0.5309 | **0.4825** | 0.5475 | 逆MAE重み付き |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
-※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 500 trials）
+※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 200 trials）
 ※ Ensemble = 最大5モデルの逆MAE重み付き平均（利用可能なモデルで動的に構築）
 
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
@@ -74,7 +74,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
 | モデル (Python) | LightGBM + CatBoost + ElasticNet Bayes + Component (PECOTA方式) |
 | モデル (BQML) | Boosted Tree Regressor + 線形回帰（SQL だけで ML） |
-| 最適化 | Optuna（LGB 1000 / CatBoost 500 / Component 各200 trials） |
+| 最適化 | Optuna（LGB 1000 / CatBoost 200 / Component 各200 trials） |
 | ベースライン | Marcel 法（Tom Tango考案、加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
@@ -100,7 +100,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
   ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
-  ↓ train_catboost.py      CatBoost — Optuna 500 trials + 異なる分割戦略
+  ↓ train_catboost.py      CatBoost — Optuna 200 trials + 異なる分割戦略
   ↓ train_components.py    PECOTA方式 — K%/BB%/BABIP/ISO(HR/9) 個別予測 → Ridge再構成
   ↓ train_bayes.py         ElasticNet — Marcel残差学習 + LGB/Cat OOFスタッキング + MC CI
   ↓ ensemble.py            5モデル逆MAE重み付き平均（利用可能モデルで動的構築）
