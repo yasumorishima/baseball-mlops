@@ -11,7 +11,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 | 本番 Dashboard | https://baseball-mlops.streamlit.app/ | Streamlit Cloud |
 | 開発 Dashboard | https://baseball-mlops-dev.streamlit.app/ | Spring Training 検証 |
 | データ基盤 | BigQuery `data-platform-490901.mlb_statcast` | 生データ + BQML モデル |
-| Grafana | [MLB Statcast Predictions](https://yasumorishima.grafana.net/d/a0b7e416-7d99-4cdd-b30a-85fb6ab87923) | 予測分布・バックテスト・モデル比較 |
+| Grafana | [MLB Statcast Predictions](https://yasumorishima.grafana.net/public-dashboards/4089c1bbd6834f2082921329219b5b44) | 予測分布・バックテスト・モデル比較 |
 
 ![MLB Statcast Predictions — Grafana Dashboard](docs/images/grafana-preview.png)
 
