@@ -57,6 +57,7 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """BQ 非互換カラム名を修正する（% → _pct、特殊文字除去）
 
     BigQuery カラム名に使えるのは英数字・アンダースコアのみ。
+    重複カラム名が発生した場合は連番サフィックスを付与する。
     """
     import re
 
@@ -80,6 +81,22 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
             rename[col] = new
     if rename:
         df = df.rename(columns=rename)
+
+    # 重複カラム名を検出して連番サフィックスで解消
+    seen: dict[str, int] = {}
+    new_cols = []
+    for col in df.columns:
+        if col in seen:
+            seen[col] += 1
+            deduped = f"{col}_{seen[col]}"
+            print(f"    WARN: duplicate column '{col}' → '{deduped}'")
+            new_cols.append(deduped)
+        else:
+            seen[col] = 0
+            new_cols.append(col)
+    if new_cols != list(df.columns):
+        df.columns = new_cols
+
     return df
 
 
@@ -121,7 +138,9 @@ def load_csv_to_bq(
         job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
         job.result()  # 完了を待機
     except Exception as e:
-        print(f"  ERROR: {table_name} ← {csv_path.name}: {e}")
+        print(f"  ERROR: {table_name} ← {csv_path.name}: {type(e).__name__}: {e!r}")
+        print(f"    columns ({len(df.columns)}): {list(df.columns)[:10]}...")
+        print(f"    dtypes: {dict(df.dtypes.value_counts())}")
         return 0
 
     table = client.get_table(table_id)
@@ -180,10 +199,23 @@ def append_metrics() -> None:
     job_config = bigquery.LoadJobConfig(
         write_disposition="WRITE_APPEND",
         autodetect=True,
+        schema_update_options=[
+            bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+        ],
     )
 
-    job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
-    job.result()
+    try:
+        job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
+        job.result()
+    except Exception as e:
+        print(f"  ERROR: model_metrics_history append failed: {e}")
+        print("  Attempting WRITE_TRUNCATE fallback...")
+        job_config_fallback = bigquery.LoadJobConfig(
+            write_disposition="WRITE_TRUNCATE",
+            autodetect=True,
+        )
+        job = client.load_table_from_dataframe(df, table_id, job_config=job_config_fallback)
+        job.result()
 
     table = client.get_table(table_id)
     print(f"  OK: model_metrics_history appended (total {table.num_rows} rows)")
