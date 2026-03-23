@@ -30,7 +30,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 | 投手 xFIP MAE | 0.5576 | 0.5326 | 0.5309 | **0.4825** | 0.5475 | 逆MAE重み付き |
 
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
-※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 200 trials）
+※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 60 trials + MedianPruner）
 ※ Ensemble = 最大5モデルの逆MAE重み付き平均（利用可能なモデルで動的に構築）
 ※ **v10 で Bayes を Stan 階層モデルに置き換え済み — 初回実行結果でMAE更新予定**
 
@@ -75,7 +75,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
 | モデル (Python) | LightGBM + CatBoost + **Stan 階層 Bayes** + Component (PECOTA方式) |
 | モデル (BQML) | Boosted Tree Regressor + 線形回帰（SQL だけで ML） |
-| 最適化 | Optuna（LGB 1000 / CatBoost 200 / Component 各200 trials） |
+| 最適化 | Optuna（LGB 1000 / CatBoost 60 + MedianPruner / Component 各200 trials） |
 | ベースライン | Marcel 法（Tom Tango考案、加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
@@ -101,7 +101,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
   ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
-  ↓ train_catboost.py      CatBoost — Optuna 200 trials + 異なる分割戦略
+  ↓ train_catboost.py      CatBoost — Optuna 60 trials + MedianPruner + 異なる分割戦略
   ↓ train_components.py    PECOTA方式 — K%/BB%/BABIP/ISO(HR/9) 個別予測 → Ridge再構成
   ↓ train_bayes.py         Stan 階層 Bayes — 選手ランダム効果 + スキル群別正則化 + MCMC
   ↓ ensemble.py            5モデル逆MAE重み付き平均（利用可能モデルで動的構築）
@@ -155,7 +155,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 
 ### CatBoost（train_catboost.py）
 - **CV**: LightGBM とは異なる分割戦略でアンサンブル多様性を確保
-- **最適化**: Optuna 200 トライアル + MedianPruner
+- **最適化**: Optuna 60 トライアル + MedianPruner（ARM64 RPi5 向けに最適化）
 - **Recency Decay**: 0.85/年で近年サンプルを重み付け
 - **OOF**: `cat_oof_batter/pitcher.csv` → Bayes スタッキングに利用
 
