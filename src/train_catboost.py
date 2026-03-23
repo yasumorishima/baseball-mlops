@@ -31,8 +31,10 @@ from train import (
     OPTUNA_TRIALS,
 )
 
-CATBOOST_TRIALS = 200  # LGBの1/5（CatBoostは1trial≒18s、200trials≒1h）
+CATBOOST_TRIALS = 60   # RPi5 ARM64: 200→60に削減（MedianPruner併用で精度維持）
 _EARLY_STOPPING = 50
+_CATBOOST_ITERATIONS = 600  # 1000→600（early_stopping=50で十分収束）
+_CATBOOST_THREAD_COUNT = 4  # RPi5は4コア
 RECENCY_DECAY = 0.85
 
 
@@ -70,9 +72,10 @@ def tune_catboost(X: pd.DataFrame, y: pd.Series, seasons: np.ndarray,
     def objective(trial: optuna.Trial) -> float:
         params = {
             "loss_function": "MAE",
-            "iterations": 1000,
+            "iterations": _CATBOOST_ITERATIONS,
+            "thread_count": _CATBOOST_THREAD_COUNT,
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
-            "depth": trial.suggest_int("depth", 4, 10),
+            "depth": trial.suggest_int("depth", 4, 8),
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 0.1, 10.0, log=True),
             "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 5, 50),
             "bagging_temperature": trial.suggest_float("bagging_temperature", 0.0, 1.0),
@@ -90,7 +93,8 @@ def tune_catboost(X: pd.DataFrame, y: pd.Series, seasons: np.ndarray,
     best = study.best_params
     best.update({
         "loss_function": "MAE",
-        "iterations": 1000,
+        "iterations": _CATBOOST_ITERATIONS,
+        "thread_count": _CATBOOST_THREAD_COUNT,
         "random_seed": 42,
     })
     return best

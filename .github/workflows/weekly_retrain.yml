@@ -58,24 +58,28 @@ jobs:
         continue-on-error: true
 
       - name: Train LightGBM (Optuna 1000 trials + recency weight)
+        timeout-minutes: 120
         run: python src/train.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Train CatBoost (Optuna 200 trials + pruning + recency weight)
+      - name: Train CatBoost (Optuna 60 trials + pruning + recency weight)
+        timeout-minutes: 90
         run: python src/train_catboost.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
       - name: Train Component models (PECOTA approach)
+        timeout-minutes: 30
         run: python src/train_components.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
       - name: Train Bayes model (Stan hierarchical + LGB/Cat stacking)
+        timeout-minutes: 60
         run: python src/train_bayes.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
