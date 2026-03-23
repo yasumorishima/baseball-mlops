@@ -29,6 +29,19 @@ jobs:
           pip install -r requirements.txt
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      - name: Install CmdStan (for hierarchical Bayes)
+        run: |
+          # CmdStan persists on self-hosted runner; only install if missing or outdated
+          CMDSTAN_VER="2.36.0"
+          CMDSTAN_DIR="$HOME/.cmdstan/cmdstan-${CMDSTAN_VER}"
+          if [ -d "$CMDSTAN_DIR" ]; then
+            echo "CmdStan ${CMDSTAN_VER} already installed at ${CMDSTAN_DIR}"
+          else
+            echo "Installing CmdStan ${CMDSTAN_VER}..."
+            python -m cmdstanpy.install_cmdstan --version "${CMDSTAN_VER}" --cores 4
+          fi
+          echo "CMDSTAN=${CMDSTAN_DIR}" >> "$GITHUB_ENV"
+
       - name: Fetch Statcast data (incl. bat tracking + arsenal)
         run: python src/fetch_statcast.py
         env:
@@ -62,11 +75,12 @@ jobs:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Train Bayes model (ElasticNet + LGB/Cat stacking)
+      - name: Train Bayes model (Stan hierarchical + LGB/Cat stacking)
         run: python src/train_bayes.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+          CMDSTAN: ${{ env.CMDSTAN }}
 
       - name: Ensemble (5-model inverse-MAE weighted)
         id: ensemble
@@ -147,7 +161,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add predictions/
-          git diff --staged --quiet || git commit -m "chore: update predictions (v8 5-model ensemble) [skip ci]"
+          git diff --staged --quiet || git commit -m "chore: update predictions (v10 hierarchical Bayes ensemble) [skip ci]"
           git pull --rebase origin ${{ github.ref_name }}
           git push
 
@@ -171,21 +185,21 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"✅ baseball-mlops v9 再学習完了 (GCP統合)\",
+                \"title\": \"✅ baseball-mlops v10 再学習完了 (GCP統合)\",
                 \"color\": 3066993,
                 \"fields\": [
                   {\"name\": \"打者 wOBA MAE (Python)\", \"value\": \"${BAT_MAE:-計測中}\", \"inline\": false},
                   {\"name\": \"投手 xFIP MAE (Python)\", \"value\": \"${PIT_MAE:-計測中}\", \"inline\": false},
                   {\"name\": \"打者 wOBA MAE (BQML)\", \"value\": \"${BQML_BAT:-N/A}\", \"inline\": false},
                   {\"name\": \"投手 xFIP MAE (BQML)\", \"value\": \"${BQML_PIT:-N/A}\", \"inline\": false},
-                  {\"name\": \"モデル構成\", \"value\": \"Python 5-model + BQML Boosted Tree + Linear\", \"inline\": false},
+                  {\"name\": \"モデル構成\", \"value\": \"v10: Stan階層Bayes + LGB + CatBoost + Component + BQML\", \"inline\": false},
                   {\"name\": \"BigQuery\", \"value\": \"13 raw + 2 pred tables\", \"inline\": true},
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
                   {\"name\": \"トリガー\", \"value\": \"${{ github.event_name }}\", \"inline\": true},
                   {\"name\": \"メモ\", \"value\": \"${MEMO:-cron}\", \"inline\": true},
                   {\"name\": \"実行ログ\", \"value\": \"[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\", \"inline\": false}
                 ],
-                \"footer\": {\"text\": \"v9: GCP BigQuery + BQML + Cloud Run\"}
+                \"footer\": {\"text\": \"v10: Stan Hierarchical Bayes + GCP + BQML\"}
               }]
             }"
         env:
@@ -200,7 +214,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
-                \"title\": \"❌ baseball-mlops v9 再学習失敗\",
+                \"title\": \"❌ baseball-mlops v10 再学習失敗\",
                 \"color\": 15158332,
                 \"fields\": [
                   {\"name\": \"ブランチ\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
