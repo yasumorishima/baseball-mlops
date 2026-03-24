@@ -71,8 +71,8 @@ jobs:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
-      - name: Train Component models (PECOTA approach)
-        timeout-minutes: 30
+      - name: Train Component models (PECOTA approach, 40 trials × 7)
+        timeout-minutes: 60
         run: python src/train_components.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}

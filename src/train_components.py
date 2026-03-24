@@ -37,7 +37,7 @@ BATTER_COMPONENTS = ["K%", "BB%", "BABIP", "ISO"]
 # Component targets for pitchers
 PITCHER_COMPONENTS = ["K%", "BB%", "HR/9"]
 
-COMPONENT_OPTUNA_TRIALS = 200  # Per component (4-6 models total, 200 each)
+COMPONENT_OPTUNA_TRIALS = 40  # Per component (7 models × 40 = 280 total, ARM64 optimized)
 _EARLY_STOPPING = 50
 RECENCY_DECAY = 0.85
 
@@ -166,19 +166,15 @@ def run_component_prediction():
         # Component target: next-year value of this component
         target_col = f"target_{comp.replace('%', '_pct').replace('/', '_')}"
 
-        # Build target: actual next-year component value
+        # Build target via vectorized merge (much faster than iterrows)
         train_comp = train_bat.copy()
-        # The target year's component value is in the raw data
-        comp_targets = []
-        for _, row in train_comp.iterrows():
-            player = row["player"]
-            season = row["season"]  # This IS the target year
-            actual = bat_df[(bat_df["player"] == player) & (bat_df["season"] == season)]
-            if len(actual) > 0 and comp in actual.columns:
-                comp_targets.append(float(actual.iloc[0].get(comp, np.nan)))
-            else:
-                comp_targets.append(np.nan)
-        train_comp[target_col] = comp_targets
+        if comp in bat_df.columns:
+            lookup = bat_df[["player", "season", comp]].drop_duplicates(
+                subset=["player", "season"], keep="first"
+            ).rename(columns={comp: target_col})
+            train_comp = train_comp.merge(lookup, on=["player", "season"], how="left")
+        else:
+            train_comp[target_col] = np.nan
         train_comp = train_comp.dropna(subset=[target_col])
 
         if len(train_comp) < 50:
@@ -269,17 +265,15 @@ def run_component_prediction():
     for comp in PITCHER_COMPONENTS:
         target_col = f"target_{comp.replace('%', '_pct').replace('/', '_')}"
 
+        # Build target via vectorized merge (much faster than iterrows)
         train_comp = train_pit.copy()
-        comp_targets = []
-        for _, row in train_comp.iterrows():
-            player = row["player"]
-            season = row["season"]
-            actual = pit_df[(pit_df["player"] == player) & (pit_df["season"] == season)]
-            if len(actual) > 0 and comp in actual.columns:
-                comp_targets.append(float(actual.iloc[0].get(comp, np.nan)))
-            else:
-                comp_targets.append(np.nan)
-        train_comp[target_col] = comp_targets
+        if comp in pit_df.columns:
+            lookup = pit_df[["player", "season", comp]].drop_duplicates(
+                subset=["player", "season"], keep="first"
+            ).rename(columns={comp: target_col})
+            train_comp = train_comp.merge(lookup, on=["player", "season"], how="left")
+        else:
+            train_comp[target_col] = np.nan
         train_comp = train_comp.dropna(subset=[target_col])
 
         if len(train_comp) < 50:
