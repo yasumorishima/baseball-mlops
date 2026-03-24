@@ -12,7 +12,7 @@ on:
 
 jobs:
   retrain:
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
       contents: write
@@ -22,24 +22,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup venv and install dependencies
-        run: |
-          python3 -m venv .venv
-          . .venv/bin/activate
-          pip install -r requirements.txt
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Install CmdStan (for hierarchical Bayes)
         run: |
-          # CmdStan persists on self-hosted runner; only install if missing or outdated
           CMDSTAN_VER="2.36.0"
+          echo "Installing CmdStan ${CMDSTAN_VER}..."
+          python -m cmdstanpy.install_cmdstan --version "${CMDSTAN_VER}" --cores 2
           CMDSTAN_DIR="$HOME/.cmdstan/cmdstan-${CMDSTAN_VER}"
-          if [ -d "$CMDSTAN_DIR" ]; then
-            echo "CmdStan ${CMDSTAN_VER} already installed at ${CMDSTAN_DIR}"
-          else
-            echo "Installing CmdStan ${CMDSTAN_VER}..."
-            python -m cmdstanpy.install_cmdstan --version "${CMDSTAN_VER}" --cores 4
-          fi
           echo "CMDSTAN=${CMDSTAN_DIR}" >> "$GITHUB_ENV"
 
       - name: Fetch Statcast data (incl. bat tracking + arsenal)
