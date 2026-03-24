@@ -1,62 +1,44 @@
 // Hierarchical Bayesian model for MLB batter wOBA prediction — v11
 //
-// Architecture:
-//   y[n] = actual wOBA
-//   mu[n] = Marcel[n] + alpha[player[n]]
-//           + X_contact[n] @ beta_contact
-//           + X_discipline[n] @ beta_discipline
-//           + X_expected[n] @ beta_expected
-//           + X_context[n] @ beta_context
-//           + X_approach_bq[n] @ beta_approach_bq        (NEW: BQ pitch-level)
-//           + X_batted_ball_bq[n] @ beta_batted_ball_bq  (NEW: BQ pitch-level)
-//           + X_power_bq[n] @ beta_power_bq              (NEW: BQ pitch-level)
-//           + X_run_value_bq[n] @ beta_run_value_bq      (NEW: BQ pitch-level)
-//           + beta_age * z_age[n] + beta_age2 * z_age[n]^2
-//           + beta_lgb * lgb_delta[n] + beta_cat * cat_delta[n]
-//   sigma[n] = sigma_base * exp(gamma_pa * z_log_pa[n])
-//
-// 8 skill groups total:
-//   Original: contact, discipline, expected, context
-//   v11 BQ:  approach_bq, batted_ball_bq, power_bq, run_value_bq
+// 10 skill groups:
+//   FG/Savant: contact, discipline, expected, context, offense, batted_ball_fg
+//   BQ:       approach_bq, batted_ball_bq, power_bq, run_value_bq
 
 data {
-  int<lower=1> N;                            // training observations
-  int<lower=1> P;                            // unique players
-  int<lower=1> K_contact;                    // contact quality features
-  int<lower=1> K_discipline;                 // plate discipline features
-  int<lower=1> K_expected;                   // expected stat features
-  int<lower=1> K_context;                    // contextual features
-  int<lower=1> K_approach_bq;               // BQ plate approach features
-  int<lower=1> K_batted_ball_bq;            // BQ batted ball profile features
-  int<lower=1> K_power_bq;                  // BQ power/EV quality features
-  int<lower=1> K_run_value_bq;              // BQ run value features
+  int<lower=1> N;
+  int<lower=1> P;
+  int<lower=1> K_contact;
+  int<lower=1> K_discipline;
+  int<lower=1> K_expected;
+  int<lower=1> K_context;
+  int<lower=1> K_offense;
+  int<lower=1> K_batted_ball_fg;
+  int<lower=1> K_approach_bq;
+  int<lower=1> K_batted_ball_bq;
+  int<lower=1> K_power_bq;
+  int<lower=1> K_run_value_bq;
 
-  array[N] int<lower=1, upper=P> player;     // player index per obs
-  vector[N] marcel;                          // Marcel baseline (offset)
-  vector[N] y;                               // actual wOBA (target)
+  array[N] int<lower=1, upper=P> player;
+  vector[N] marcel;
+  vector[N] y;
 
-  // Feature matrices (z-scored)
   matrix[N, K_contact] X_contact;
   matrix[N, K_discipline] X_discipline;
   matrix[N, K_expected] X_expected;
   matrix[N, K_context] X_context;
+  matrix[N, K_offense] X_offense;
+  matrix[N, K_batted_ball_fg] X_batted_ball_fg;
   matrix[N, K_approach_bq] X_approach_bq;
   matrix[N, K_batted_ball_bq] X_batted_ball_bq;
   matrix[N, K_power_bq] X_power_bq;
   matrix[N, K_run_value_bq] X_run_value_bq;
 
-  // Aging
   vector[N] z_age;
   vector[N] z_age_sq;
-
-  // Stacking features (LGB/CatBoost OOF delta from Marcel)
   vector[N] lgb_delta;
   vector[N] cat_delta;
-
-  // Heteroscedasticity control
   vector[N] z_log_pa;
 
-  // Prediction data
   int<lower=0> N_pred;
   array[N_pred] int<lower=1, upper=P> player_pred;
   vector[N_pred] marcel_pred;
@@ -64,6 +46,8 @@ data {
   matrix[N_pred, K_discipline] X_discipline_pred;
   matrix[N_pred, K_expected] X_expected_pred;
   matrix[N_pred, K_context] X_context_pred;
+  matrix[N_pred, K_offense] X_offense_pred;
+  matrix[N_pred, K_batted_ball_fg] X_batted_ball_fg_pred;
   matrix[N_pred, K_approach_bq] X_approach_bq_pred;
   matrix[N_pred, K_batted_ball_bq] X_batted_ball_bq_pred;
   matrix[N_pred, K_power_bq] X_power_bq_pred;
@@ -76,49 +60,36 @@ data {
 }
 
 parameters {
-  // --- Player hierarchy ---
   real<lower=0> sigma_alpha;
   vector[P] z_alpha;
 
-  // --- Original skill-group coefficients ---
   real<lower=0> tau_contact;
   vector[K_contact] z_beta_contact;
-
   real<lower=0> tau_discipline;
   vector[K_discipline] z_beta_discipline;
-
   real<lower=0> tau_expected;
   vector[K_expected] z_beta_expected;
-
   real<lower=0> tau_context;
   vector[K_context] z_beta_context;
 
-  // --- v11 BQ skill-group coefficients ---
-  // Approach: whiff, chase, zone_contact, zone_swing, called_strike, first_pitch_swing
+  real<lower=0> tau_offense;
+  vector[K_offense] z_beta_offense;
+  real<lower=0> tau_batted_ball_fg;
+  vector[K_batted_ball_fg] z_beta_batted_ball_fg;
+
   real<lower=0> tau_approach_bq;
   vector[K_approach_bq] z_beta_approach_bq;
-
-  // Batted ball: GB/FB/LD/popup rates, sweet spot, distance
   real<lower=0> tau_batted_ball_bq;
   vector[K_batted_ball_bq] z_beta_batted_ball_bq;
-
-  // Power: avg/max/p90 EV, hard hit, barrel
   real<lower=0> tau_power_bq;
   vector[K_power_bq] z_beta_power_bq;
-
-  // Run value: avg run value, xwOBA, xBA, count leverage
   real<lower=0> tau_run_value_bq;
   vector[K_run_value_bq] z_beta_run_value_bq;
 
-  // --- Aging ---
   real beta_age;
   real beta_age2;
-
-  // --- Stacking ---
   real beta_lgb;
   real beta_cat;
-
-  // --- Noise ---
   real<lower=0> sigma_base;
   real gamma_pa;
 }
@@ -129,6 +100,8 @@ transformed parameters {
   vector[K_discipline] beta_discipline = tau_discipline * z_beta_discipline;
   vector[K_expected] beta_expected = tau_expected * z_beta_expected;
   vector[K_context] beta_context = tau_context * z_beta_context;
+  vector[K_offense] beta_offense = tau_offense * z_beta_offense;
+  vector[K_batted_ball_fg] beta_batted_ball_fg = tau_batted_ball_fg * z_beta_batted_ball_fg;
   vector[K_approach_bq] beta_approach_bq = tau_approach_bq * z_beta_approach_bq;
   vector[K_batted_ball_bq] beta_batted_ball_bq = tau_batted_ball_bq * z_beta_batted_ball_bq;
   vector[K_power_bq] beta_power_bq = tau_power_bq * z_beta_power_bq;
@@ -136,51 +109,40 @@ transformed parameters {
 }
 
 model {
-  // === Priors ===
-
-  // Player random effects
-  sigma_alpha ~ exponential(30);             // expect ~0.03 (small wOBA deviations)
+  sigma_alpha ~ exponential(30);
   z_alpha ~ std_normal();
 
-  // Original skill-group hierarchical scales
   tau_contact ~ normal(0, 0.04);
   tau_discipline ~ normal(0, 0.05);
   tau_expected ~ normal(0, 0.05);
   tau_context ~ normal(0, 0.02);
-
-  // v11 BQ skill-group scales
-  // Approach: pitch selection directly impacts wOBA; moderate prior
+  // Offense: wRC+/WAR/OPS are strong composite predictors
+  tau_offense ~ normal(0, 0.05);
+  // FG batted ball: GB/FB/LD/pull/oppo distribution
+  tau_batted_ball_fg ~ normal(0, 0.03);
   tau_approach_bq ~ normal(0, 0.04);
-  // Batted ball profile: GB/LD/FB distribution is predictive
   tau_batted_ball_bq ~ normal(0, 0.03);
-  // Power quality: EV/barrel have strong wOBA signal
   tau_power_bq ~ normal(0, 0.04);
-  // Run values: moderate effect (correlated with expected stats)
   tau_run_value_bq ~ normal(0, 0.03);
 
-  // Non-centered feature coefficients
   z_beta_contact ~ std_normal();
   z_beta_discipline ~ std_normal();
   z_beta_expected ~ std_normal();
   z_beta_context ~ std_normal();
+  z_beta_offense ~ std_normal();
+  z_beta_batted_ball_fg ~ std_normal();
   z_beta_approach_bq ~ std_normal();
   z_beta_batted_ball_bq ~ std_normal();
   z_beta_power_bq ~ std_normal();
   z_beta_run_value_bq ~ std_normal();
 
-  // Aging: peak at 27, ~3 wOBA points decline/year, accelerating after 30
   beta_age ~ normal(-0.003, 0.01);
   beta_age2 ~ normal(-0.001, 0.005);
-
-  // Stacking
   beta_lgb ~ normal(0.3, 0.2);
   beta_cat ~ normal(0.2, 0.2);
-
-  // Noise
   sigma_base ~ exponential(20);
   gamma_pa ~ normal(-0.1, 0.1);
 
-  // === Likelihood ===
   {
     vector[N] mu = marcel
                    + alpha[player]
@@ -188,6 +150,8 @@ model {
                    + X_discipline * beta_discipline
                    + X_expected * beta_expected
                    + X_context * beta_context
+                   + X_offense * beta_offense
+                   + X_batted_ball_fg * beta_batted_ball_fg
                    + X_approach_bq * beta_approach_bq
                    + X_batted_ball_bq * beta_batted_ball_bq
                    + X_power_bq * beta_power_bq
@@ -209,7 +173,6 @@ generated quantities {
   vector[N_pred] y_pred;
   vector[N] log_lik;
 
-  // Predictions
   for (i in 1:N_pred) {
     real mu_i = marcel_pred[i]
                 + alpha[player_pred[i]]
@@ -217,6 +180,8 @@ generated quantities {
                 + X_discipline_pred[i] * beta_discipline
                 + X_expected_pred[i] * beta_expected
                 + X_context_pred[i] * beta_context
+                + X_offense_pred[i] * beta_offense
+                + X_batted_ball_fg_pred[i] * beta_batted_ball_fg
                 + X_approach_bq_pred[i] * beta_approach_bq
                 + X_batted_ball_bq_pred[i] * beta_batted_ball_bq
                 + X_power_bq_pred[i] * beta_power_bq
@@ -229,7 +194,6 @@ generated quantities {
     y_pred[i] = normal_rng(mu_i, sigma_i);
   }
 
-  // Log-likelihood for LOO-CV
   for (n in 1:N) {
     real mu_n = marcel[n]
                 + alpha[player[n]]
@@ -237,6 +201,8 @@ generated quantities {
                 + X_discipline[n] * beta_discipline
                 + X_expected[n] * beta_expected
                 + X_context[n] * beta_context
+                + X_offense[n] * beta_offense
+                + X_batted_ball_fg[n] * beta_batted_ball_fg
                 + X_approach_bq[n] * beta_approach_bq
                 + X_batted_ball_bq[n] * beta_batted_ball_bq
                 + X_power_bq[n] * beta_power_bq

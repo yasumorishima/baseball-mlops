@@ -110,6 +110,18 @@ BATTER_FEATURES = [
     "wOBA", "xwOBA", "K%", "BB%", "ISO", "BABIP", "OBP", "SLG",
     # FanGraphs (追加 v5)
     "SwStr%", "HardHit%", "Contact%", "O-Swing%", "G",
+    # v11: FanGraphs 主要指標（全年利用可能）
+    "wRC+", "WAR", "Off", "Def", "BsR", "Spd",
+    "AVG", "OPS", "wRAA",
+    "HR/FB",
+    # v11: FanGraphs 打球タイプ（全年利用可能）
+    "GB%", "FB%", "LD%", "IFFB%",
+    "Pull%", "Cent%", "Oppo%",
+    "Soft%", "Med%", "Hard%",
+    # v11: FanGraphs ゾーン別スイング・コンタクト
+    "O-Contact%", "Z-Contact%", "Z-Swing%",
+    # v11: FanGraphs 球種別打撃価値
+    "wFB/C", "wSL/C", "wCH/C",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba",
     # Statcast exit velo / barrels
@@ -162,6 +174,19 @@ PITCHER_FEATURES = [
     "SwStr%", "K-BB%", "CSW%", "G",
     # FanGraphs Stuff+/Location+/Pitching+ (2020+, NaN for earlier)
     "Stuff+", "Location+", "Pitching+",
+    # v11: FanGraphs 主要指標
+    "WAR", "SIERA", "ERA-", "FIP-", "xFIP-",
+    "K/9", "BB/9", "K/BB", "HR/FB",
+    # v11: FanGraphs 打球タイプ
+    "GB%", "FB%", "LD%", "IFFB%",
+    "Pull%", "Cent%", "Oppo%",
+    "Soft%", "Med%", "Hard%",
+    # v11: FanGraphs ゾーン別スイング・コンタクト
+    "O-Swing%", "Z-Swing%", "O-Contact%", "Z-Contact%", "Zone%",
+    # v11: FanGraphs 球種別投球価値
+    "wFB/C", "wSL/C", "wCH/C",
+    # v11: FanGraphs 先発/リリーフ
+    "GS", "Start-IP", "Relief-IP",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba", "xera",
     # Statcast exit velo (被打球)
