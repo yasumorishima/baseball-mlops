@@ -32,7 +32,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
 ※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 60 trials + MedianPruner）
 ※ Ensemble = 最大5モデルの逆MAE重み付き平均（利用可能なモデルで動的に構築）
-※ **v10 で Bayes を Stan 階層モデルに置き換え済み — 初回実行結果でMAE更新予定**
+※ **v10 で Bayes を Stan 階層モデルに置き換え済み — Component trials 最適化後の再実行中（Run 23471299455）**
 
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
 MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等）を使うことで ML が上回った。
@@ -75,7 +75,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
 | モデル (Python) | LightGBM + CatBoost + **Stan 階層 Bayes** + Component (PECOTA方式) |
 | モデル (BQML) | Boosted Tree Regressor + 線形回帰（SQL だけで ML） |
-| 最適化 | Optuna（LGB 1000 / CatBoost 60 + MedianPruner / Component 各200 trials） |
+| 最適化 | Optuna（LGB 1000 / CatBoost 60 + MedianPruner / Component 各40 trials） |
 | ベースライン | Marcel 法（Tom Tango考案、加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
@@ -162,7 +162,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 ### Component Prediction — PECOTA 方式（train_components.py）
 - **打者**: K% / BB% / BABIP / ISO を個別に LightGBM で予測 → Ridge で wOBA を再構成
 - **投手**: K% / BB% / HR/9 を個別に LightGBM で予測 → Ridge で xFIP を再構成
-- **最適化**: 各コンポーネント Optuna 200 トライアル
+- **最適化**: 各コンポーネント Optuna 40 トライアル（ARM64 最適化）
 - 個別指標の予測を合成するため、モデルの解釈性が高い
 
 ### Stan Hierarchical Bayes（train_bayes.py, v10）
