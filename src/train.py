@@ -112,6 +112,7 @@ BATTER_FEATURES = [
     "SwStr%", "HardHit%", "Contact%", "O-Swing%", "G",
     # v11: FanGraphs 主要指標（全年利用可能）
     "wRC+", "WAR", "Off", "Def", "BsR", "Spd",
+    "Clutch", "WPA",
     "AVG", "OPS", "wRAA",
     "HR/FB",
     # v11: FanGraphs 打球タイプ（全年利用可能）
@@ -119,7 +120,7 @@ BATTER_FEATURES = [
     "Pull%", "Cent%", "Oppo%",
     "Soft%", "Med%", "Hard%",
     # v11: FanGraphs ゾーン別スイング・コンタクト
-    "O-Contact%", "Z-Contact%", "Z-Swing%",
+    "O-Contact%", "Z-Contact%", "Z-Swing%", "Zone%",
     # v11: FanGraphs 球種別打撃価値
     "wFB/C", "wSL/C", "wCH/C",
     # Statcast expected stats
@@ -415,7 +416,47 @@ def build_train_data_batters(df: pd.DataFrame, min_pa: int = 100):
             feats["season"] = year
             records.append(feats)
 
-    return pd.DataFrame(records)
+    result = pd.DataFrame(records)
+    _print_coverage_report(result, "BATTER", BATTER_FEATURES)
+    return result
+
+
+def _print_coverage_report(df: pd.DataFrame, label: str, features: list[str]):
+    """特徴量カバレッジレポートを出力"""
+    print(f"\n{'='*60}")
+    print(f"COVERAGE REPORT: {label} ({len(df)} samples)")
+    print(f"{'='*60}")
+    high_null = []
+    for f in features:
+        # y1 (直前シーズン) のnull率をチェック
+        col = f"{f}_y1"
+        if col in df.columns:
+            null_pct = df[col].isna().mean() * 100
+            if null_pct > 50:
+                high_null.append((f, null_pct))
+        else:
+            high_null.append((f, -1))  # カラム自体が存在しない
+
+    if high_null:
+        print(f"  WARNING: {len(high_null)} features with >50% null (y1):")
+        for f, pct in sorted(high_null, key=lambda x: -x[1]):
+            if pct == -1:
+                print(f"    {f}: MISSING COLUMN")
+            else:
+                print(f"    {f}: {pct:.1f}% null")
+    else:
+        print(f"  All {len(features)} features have <50% null in y1")
+
+    # BQ特徴量の全体カバレッジ
+    bq_cols = [c for c in df.columns if "bq_" in c and "_y1" in c]
+    if bq_cols:
+        bq_any = df[bq_cols].notna().any(axis=1).mean() * 100
+        print(f"  BQ features coverage: {bq_any:.1f}% of samples have at least 1 BQ feature")
+
+    # 年別サンプル数
+    if "season" in df.columns:
+        print(f"  Samples by year: {dict(df['season'].value_counts().sort_index())}")
+    print(f"{'='*60}\n")
 
 
 def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
@@ -453,7 +494,9 @@ def build_train_data_pitchers(df: pd.DataFrame, min_ip: int = 30):
             feats["season"] = year
             records.append(feats)
 
-    return pd.DataFrame(records)
+    result = pd.DataFrame(records)
+    _print_coverage_report(result, "PITCHER", PITCHER_FEATURES)
+    return result
 
 
 # ---------------------------------------------------------------------------
