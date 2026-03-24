@@ -80,7 +80,7 @@ BAT_RUN_VALUE_BQ = [
 ]
 
 # PITCHER: 9 skill groups (5 original + 4 BQ pitch-level)
-PIT_STUFF = ["K%", "Stuff+", "SwStr%", "best_whiff", "avg_whiff_weighted"]
+PIT_STUFF = ["K%", "Stuff+", "Pitching+", "SwStr%", "best_whiff", "avg_whiff_weighted"]
 PIT_COMMAND = ["BB%", "Location+", "CSW%", "K-BB%"]
 PIT_CONTACT_MGMT = ["brl_percent", "avg_hit_speed", "HardHit%", "est_woba"]
 PIT_ARSENAL = ["n_pitch_types", "usage_entropy"]

@@ -160,6 +160,8 @@ PITCHER_FEATURES = [
     "xFIP", "FIP", "ERA", "K%", "BB%", "HR/9", "WHIP", "BABIP", "LOB%",
     # FanGraphs (追加 v5)
     "SwStr%", "K-BB%", "CSW%", "G",
+    # FanGraphs Stuff+/Location+/Pitching+ (2020+, NaN for earlier)
+    "Stuff+", "Location+", "Pitching+",
     # Statcast expected stats
     "est_ba", "est_slg", "est_woba", "xera",
     # Statcast exit velo (被打球)
@@ -278,6 +280,10 @@ def _pit_delta_features(feats: dict) -> None:
 
     # --- v7: 2年ラグ差分（長期トレンド） ---
     feats["xFIP_delta_2"]   = _d("xFIP_y2",   "xFIP_y3")
+
+    # --- v11: Stuff+/Pitching+ deltas (2020+) ---
+    feats["stuff_plus_delta_1"]    = _d("Stuff+_y1", "Stuff+_y2")
+    feats["pitching_plus_delta_1"] = _d("Pitching+_y1", "Pitching+_y2")
 
     # --- v8: Arsenal deltas ---
     feats["whiff_delta_1"]  = _d("best_whiff_y1",   "best_whiff_y2")
