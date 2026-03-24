@@ -172,9 +172,9 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 ### Stan Hierarchical Bayes（train_bayes.py, v11）
 - **フレームワーク**: Stan (cmdstanpy) — NUTS MCMC 4 chains × 500 warmup + 1000 samples
 - **選手ランダム効果**: 部分プーリング（non-centered parameterization）— 低PA選手をリーグ平均に引き寄せ
-- **スキル群別階層正則化**: 特徴量をドメイン知識で **8群（打者）/ 9群（投手）** に分類し、群ごとに正則化スケール τ を推定
-  - 打者 (8群): Contact / Discipline / Expected / Context / **Approach BQ** (whiff/chase/zone contact/zone swing/called strike/first pitch swing) / **Batted Ball BQ** (GB/FB/LD/popup/sweet spot/距離) / **Power BQ** (EV avg/max/p90/hard hit/barrel) / **Run Value BQ** (run value/xwOBA/xBA/count leverage)
-  - 投手 (9群): Stuff / Command / Contact Mgmt / Arsenal / Context / **Velo BQ** (velo/spin/movement/FB detail/extension) / **Command BQ** (zone/whiff/chase/location consistency/release consistency) / **Contact BQ** (EV against/barrel/GB/xwOBA against) / **Fatigue BQ** (TTO別run value/degradation)
+- **スキル群別階層正則化**: 特徴量をドメイン知識で **10群（打者）/ 12群（投手）** に分類し、群ごとに正則化スケール τ を推定
+  - 打者 (10群): Contact / Discipline / Expected / Context / **Offense** (wRC+/WAR/Off/OPS/wRAA/HR/FB) / **Batted Ball FG** (GB%/FB%/LD%/IFFB%/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%) / **Approach BQ** (whiff/chase/zone contact/zone swing/called strike/first pitch swing) / **Batted Ball BQ** (GB/FB/LD/popup/sweet spot/距離) / **Power BQ** (EV avg/max/p90/hard hit/barrel) / **Run Value BQ** (run value/xwOBA/xBA/count leverage)
+  - 投手 (12群): Stuff (K%/Stuff+/Pitching+/SwStr%) / Command (BB%/Location+/CSW%/O-Swing%/Z-Contact%/Zone%) / Contact Mgmt / Arsenal / Context / **ERA Models** (SIERA/ERA-/FIP-/xFIP-/WAR) / **Batted Ball FG** (GB%/FB%/LD%/HR/FB/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%) / **Role** (GS/Start-IP/Relief-IP) / **Velo BQ** / **Command BQ** / **Contact BQ** / **Fatigue BQ**
 - **BQ データソース**: `mlb_wp.statcast_pitches`（6.8M 行 × 122 列、2015-2024）→ SQL で選手×シーズン集計
 - **スタッキング**: LGB/CatBoost OOF delta を Bayes 事前分布 N(0.3, 0.2) / N(0.2, 0.2) でメタ学習
 - **異分散ノイズ**: σ(PA) = σ_base × exp(γ × z_log_pa) — 低PAで広い信用区間
@@ -182,11 +182,16 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 - **CI**: MCMC 事後予測分布の 10th/90th パーセンタイル = 真の 80% 信用区間
 - **フォールバック**: cmdstanpy 不在時は ElasticNet に自動退避
 
-### 特徴量（打者: 85+個 / 投手: 90+個）
+### 特徴量（打者: 100+個 / 投手: 110+個）
 | カテゴリ | 打者 | 投手 |
 |---|---|---|
 | Statcast (API) | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/ev95percent |
-| FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G | K-BB%/CSW%/SwStr%/G/IP |
+| FanGraphs 基本 | HardHit%/Contact%/O-Swing%/SwStr%/G | K-BB%/CSW%/SwStr%/G/IP/Stuff+/Location+/Pitching+ |
+| **FG 攻撃/防御 (v11)** | **wRC+/WAR/Off/Def/BsR/Spd/AVG/OPS/wRAA/HR/FB** | **WAR/SIERA/ERA-/FIP-/xFIP-/K/9/BB/9/K/BB/HR/FB** |
+| **FG 打球タイプ (v11)** | **GB%/FB%/LD%/IFFB%/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%** | **GB%/FB%/LD%/IFFB%/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%** |
+| **FG ゾーン (v11)** | **O-Contact%/Z-Contact%/Z-Swing%** | **O-Swing%/Z-Swing%/O-Contact%/Z-Contact%/Zone%** |
+| **FG 球種価値 (v11)** | **wFB/C/wSL/C/wCH/C** | **wFB/C/wSL/C/wCH/C** |
+| **FG 役割 (v11)** | — | **GS/Start-IP/Relief-IP** |
 | Bat Tracking (v8) | avg_bat_speed/swing_tilt/attack_angle/ideal_attack_angle_rate | — |
 | Batted Ball (v8) | pull_rate/oppo_rate | — |
 | Arsenal (v8) | — | n_pitch_types/primary_usage/best_whiff/avg_whiff_weighted/best_rv100/usage_entropy |
