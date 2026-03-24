@@ -122,6 +122,35 @@ BATTER_FEATURES = [
     "ideal_attack_angle_rate",
     # v8: Batted ball direction
     "pull_rate", "oppo_rate",
+    # ====================================================================
+    # v11: BQ pitch-level aggregated features (from mlb_wp.statcast_pitches)
+    # ====================================================================
+    # Plate discipline (pitch selection quality)
+    "bq_whiff_rate", "bq_chase_rate", "bq_zone_contact_rate",
+    "bq_zone_swing_rate", "bq_called_strike_rate",
+    "bq_first_pitch_swing_rate", "bq_swing_rate",
+    "bq_two_strike_whiff_rate",
+    # Batted ball profile
+    "bq_gb_rate", "bq_fb_rate", "bq_ld_rate", "bq_popup_rate",
+    "bq_sweet_spot_rate", "bq_avg_hit_distance",
+    # Power / exit velocity quality
+    "bq_avg_ev", "bq_max_ev", "bq_ev_p90", "bq_ev_consistency",
+    "bq_avg_la", "bq_hard_hit_rate", "bq_barrel_rate",
+    # Expected stats (pitch-level)
+    "bq_avg_xwoba", "bq_avg_xba", "bq_avg_woba_value",
+    "bq_avg_babip_value", "bq_avg_iso_value",
+    # Bat tracking (2024+)
+    "bq_avg_bat_speed", "bq_avg_swing_length", "bq_avg_attack_angle",
+    "bq_bat_speed_consistency", "bq_max_bat_speed",
+    # Run values
+    "bq_avg_run_value", "bq_total_run_value",
+    # Pitch mix faced
+    "bq_avg_velo_faced", "bq_fastball_faced_pct",
+    "bq_breaking_faced_pct", "bq_offspeed_faced_pct",
+    # Count leverage
+    "bq_hitter_count_pct", "bq_pitcher_count_pct",
+    # Baserunning
+    "bq_sb_success_rate", "bq_sb_attempt_rate",
     # 基本情報
     "Age", "PA",
 ]
@@ -138,6 +167,40 @@ PITCHER_FEATURES = [
     # v8: Pitch-level arsenal features (aggregated per pitcher)
     "n_pitch_types", "primary_usage", "best_whiff",
     "avg_whiff_weighted", "best_rv100", "usage_entropy",
+    # ====================================================================
+    # v11: BQ pitch-level aggregated features (from mlb_wp.statcast_pitches)
+    # ====================================================================
+    # Stuff (velocity, spin, movement)
+    "bq_avg_velo", "bq_max_velo", "bq_velo_consistency",
+    "bq_avg_spin", "bq_avg_h_break", "bq_avg_v_break",
+    "bq_total_movement", "bq_avg_extension", "bq_avg_arm_angle",
+    # Fastball detail
+    "bq_fb_velo", "bq_fb_spin", "bq_fb_rise", "bq_fb_h_break",
+    # Breaking ball detail
+    "bq_brk_velo", "bq_brk_spin", "bq_brk_h_break", "bq_brk_v_break",
+    # Offspeed detail
+    "bq_ch_velo", "bq_ch_drop", "bq_fb_ch_velo_diff",
+    # Command (location, zone, consistency)
+    "bq_zone_rate", "bq_edge_rate", "bq_first_pitch_strike_rate",
+    "bq_location_x_consistency", "bq_location_z_consistency",
+    "bq_release_x_consistency", "bq_release_z_consistency",
+    # Whiff / Chase
+    "bq_whiff_rate", "bq_chase_rate_induced", "bq_csw_rate",
+    # Contact management
+    "bq_avg_ev_against", "bq_avg_la_against",
+    "bq_hard_hit_rate_against", "bq_barrel_rate_against",
+    "bq_gb_rate_induced", "bq_fb_rate_induced",
+    "bq_avg_xwoba_against", "bq_avg_xba_against",
+    "bq_contact_rate_against",
+    # Arsenal detail
+    "bq_n_pitch_types", "bq_fastball_pct",
+    "bq_breaking_pct", "bq_offspeed_pct",
+    # Fatigue / Times Through Order
+    "bq_rv_1st_time", "bq_rv_2nd_time", "bq_rv_3rd_time",
+    "bq_tto_degradation",
+    # Run values
+    "bq_avg_pitcher_run_value",
+    "bq_rv_fastball", "bq_rv_breaking", "bq_rv_offspeed",
     # 基本情報
     "Age", "IP",
 ]
@@ -169,6 +232,13 @@ def _bat_delta_features(feats: dict) -> None:
 
     # --- v8: Bat tracking deltas (2024+ only) ---
     feats["bat_speed_delta_1"] = _d("avg_bat_speed_y1", "avg_bat_speed_y2")
+
+    # --- v11: BQ pitch-level deltas ---
+    feats["bq_whiff_delta_1"]  = _d("bq_whiff_rate_y1", "bq_whiff_rate_y2")
+    feats["bq_chase_delta_1"]  = _d("bq_chase_rate_y1", "bq_chase_rate_y2")
+    feats["bq_ev_delta_1"]     = _d("bq_avg_ev_y1", "bq_avg_ev_y2")
+    feats["bq_barrel_delta_1"] = _d("bq_barrel_rate_y1", "bq_barrel_rate_y2")
+    feats["bq_ld_delta_1"]     = _d("bq_ld_rate_y1", "bq_ld_rate_y2")
 
     # --- v6: 交互作用 ---
     xwoba = feats.get("xwOBA_y1", np.nan)
@@ -212,6 +282,14 @@ def _pit_delta_features(feats: dict) -> None:
     # --- v8: Arsenal deltas ---
     feats["whiff_delta_1"]  = _d("best_whiff_y1",   "best_whiff_y2")
     feats["usage_entropy_delta_1"] = _d("usage_entropy_y1", "usage_entropy_y2")
+
+    # --- v11: BQ pitch-level deltas ---
+    feats["bq_velo_delta_1"]    = _d("bq_avg_velo_y1", "bq_avg_velo_y2")
+    feats["bq_spin_delta_1"]    = _d("bq_avg_spin_y1", "bq_avg_spin_y2")
+    feats["bq_whiff_delta_1"]   = _d("bq_whiff_rate_y1", "bq_whiff_rate_y2")
+    feats["bq_zone_delta_1"]    = _d("bq_zone_rate_y1", "bq_zone_rate_y2")
+    feats["bq_ev_ag_delta_1"]   = _d("bq_avg_ev_against_y1", "bq_avg_ev_against_y2")
+    feats["bq_gb_delta_1"]      = _d("bq_gb_rate_induced_y1", "bq_gb_rate_induced_y2")
 
     # --- v6: 交互作用 ---
     kbb = feats.get("K-BB%_y1", np.nan)

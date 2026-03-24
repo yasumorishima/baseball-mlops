@@ -1,6 +1,8 @@
 # baseball-mlops
 
-**MLB Statcast × GCP × MLOps — Weekly auto-retrained player performance prediction**
+**MLB Statcast × GCP × MLOps — Player performance prediction pipeline**
+
+> **v11 開発中 (2026-03-24):** BigQuery pitch-level Statcast データ（6.8M 行 × 122 列）を選手×シーズンに集計し、打者 8 / 投手 9 スキルグループの階層 Bayes モデルに統合。Weekly auto-retrain は計算環境の見直し後に再開予定。ダッシュボード・API は稼働中です。
 
 MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
 Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuery + BigQuery ML + Cloud Run)** 上で MLOps パイプラインとして継続運用する。
@@ -32,7 +34,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 ※ 未来リークなしの時系列 expanding-window CV による正直な値
 ※ LightGBM / CatBoost は Optuna 最適化済み（LGB 1000 trials / CatBoost 60 trials + MedianPruner）
 ※ Ensemble = 最大5モデルの逆MAE重み付き平均（利用可能なモデルで動的に構築）
-※ **v10 で Bayes を Stan 階層モデルに置き換え済み — Component trials 最適化後の再実行中（Run 23471299455）**
+※ **v10 で Bayes を Stan 階層モデルに置き換え済み → v11 で BQ pitch-level 特徴量を全面統合**
 
 NPB では Statcast 相当の特徴量が揃わず Marcel 法に届かなかったが、
 MLB Statcast の豊富なトラッキング特徴量（EV / Barrel% / Whiff% 等）を使うことで ML が上回った。
@@ -81,7 +83,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
 | データ基盤 | BigQuery — 生データ13テーブル + 予測結果 + メトリクス履歴 |
 | 球場補正 | savant-extras で FanGraphs から動的取得（pf_5yr） |
-| 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00） |
+| 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00）— **一時停止中** |
 | モデル管理 | W&B Model Registry（production タグ自動昇格） |
 | API (本番) | Cloud Run — FastAPI サーバーレスコンテナ（Artifact Registry 経由） |
 | API (開発) | RPi5 Docker（port 8002）— W&B から 6 時間ごとに最新モデルを自動ロード |
@@ -92,7 +94,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 
 ## アーキテクチャ
 
-### GCP 分析基盤（v10）
+### GCP 分析基盤（v11）
 
 > **開発経緯の注記**: 通常の実務フローでは BQML（SQL）でプロトタイプ → Python で本番化という順序ですが、本プロジェクトは GCP 未使用の状態で開発を始めたため Python 本番モデル（LightGBM/CatBoost 等 5モデルアンサンブル）が先に充実しました。現在は逆方向に、BQML の精度を Python 版に揃えていく段階です。
 
@@ -100,6 +102,8 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 [GitHub Actions — 毎週月曜 JST 11:00]
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
+  ↓ fetch_bq_features.py   BigQuery mlb_wp.statcast_pitches (6.8M rows) →
+                           選手×シーズン集計 (打者40+/投手50+特徴量)
   ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
   ↓ train_catboost.py      CatBoost — Optuna 60 trials + MedianPruner + 異なる分割戦略
   ↓ train_components.py    PECOTA方式 — K%/BB%/BABIP/ISO(HR/9) 個別予測 → Ridge再構成
@@ -165,27 +169,37 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 - **最適化**: 各コンポーネント Optuna 40 トライアル（ARM64 最適化）
 - 個別指標の予測を合成するため、モデルの解釈性が高い
 
-### Stan Hierarchical Bayes（train_bayes.py, v10）
+### Stan Hierarchical Bayes（train_bayes.py, v11）
 - **フレームワーク**: Stan (cmdstanpy) — NUTS MCMC 4 chains × 500 warmup + 1000 samples
 - **選手ランダム効果**: 部分プーリング（non-centered parameterization）— 低PA選手をリーグ平均に引き寄せ
-- **スキル群別階層正則化**: 特徴量をドメイン知識で4群（打者）/ 5群（投手）に分類し、群ごとに正則化スケール τ を推定
-  - 打者: Contact (brl%, exit_velo, HardHit%, maxEV, bat_speed) / Discipline (K%, BB%, O-Swing%, Contact%, SwStr%) / Expected (xwOBA, ev95%, BABIP) / Context (park_factor, pa_rate, team_changed, g_change_rate)
-  - 投手: Stuff (K%, Stuff+, SwStr%, best_whiff, avg_whiff_weighted) / Command (BB%, Location+, CSW%, K-BB%) / Contact Mgmt (brl%, exit_velo, HardHit%, est_woba) / Arsenal (n_pitch_types, usage_entropy) / Context
+- **スキル群別階層正則化**: 特徴量をドメイン知識で **8群（打者）/ 9群（投手）** に分類し、群ごとに正則化スケール τ を推定
+  - 打者 (8群): Contact / Discipline / Expected / Context / **Approach BQ** (whiff/chase/zone contact/zone swing/called strike/first pitch swing) / **Batted Ball BQ** (GB/FB/LD/popup/sweet spot/距離) / **Power BQ** (EV avg/max/p90/hard hit/barrel) / **Run Value BQ** (run value/xwOBA/xBA/count leverage)
+  - 投手 (9群): Stuff / Command / Contact Mgmt / Arsenal / Context / **Velo BQ** (velo/spin/movement/FB detail/extension) / **Command BQ** (zone/whiff/chase/location consistency/release consistency) / **Contact BQ** (EV against/barrel/GB/xwOBA against) / **Fatigue BQ** (TTO別run value/degradation)
+- **BQ データソース**: `mlb_wp.statcast_pitches`（6.8M 行 × 122 列、2015-2024）→ SQL で選手×シーズン集計
 - **スタッキング**: LGB/CatBoost OOF delta を Bayes 事前分布 N(0.3, 0.2) / N(0.2, 0.2) でメタ学習
 - **異分散ノイズ**: σ(PA) = σ_base × exp(γ × z_log_pa) — 低PAで広い信用区間
 - **加齢曲線**: 二次（β_age + β_age2 × age²）— ピーク27歳、30歳以降加速的衰退
 - **CI**: MCMC 事後予測分布の 10th/90th パーセンタイル = 真の 80% 信用区間
 - **フォールバック**: cmdstanpy 不在時は ElasticNet に自動退避
 
-### 特徴量（打者: 45+個 / 投手: 41+個）
+### 特徴量（打者: 85+個 / 投手: 90+個）
 | カテゴリ | 打者 | 投手 |
 |---|---|---|
-| Statcast | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/avg_hit_angle/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/avg_hit_angle/ev95percent |
+| Statcast (API) | K%/BB%/BABIP/brl_percent/avg_hit_speed/xwOBA/sprint_speed/ev95percent | K%/BB%/BABIP/brl_percent/avg_hit_speed/est_woba/ev95percent |
 | FanGraphs | HardHit%/Contact%/O-Swing%/SwStr%/G | K-BB%/CSW%/SwStr%/G/IP |
-| **Bat Tracking (v8)** | **avg_bat_speed/swing_tilt/attack_angle/ideal_attack_angle_rate** | — |
-| **Batted Ball (v8)** | **pull_rate/oppo_rate** | — |
-| **Arsenal (v8)** | — | **n_pitch_types/primary_usage/best_whiff/avg_whiff_weighted/best_rv100/usage_entropy** |
-| Lag delta | wOBA_delta_1/wOBA_delta_2/xwOBA_delta_1/bat_speed_delta_1 | xFIP_delta_1/xFIP_delta_2/whiff_delta_1/usage_entropy_delta_1 |
+| Bat Tracking (v8) | avg_bat_speed/swing_tilt/attack_angle/ideal_attack_angle_rate | — |
+| Batted Ball (v8) | pull_rate/oppo_rate | — |
+| Arsenal (v8) | — | n_pitch_types/primary_usage/best_whiff/avg_whiff_weighted/best_rv100/usage_entropy |
+| **BQ Plate Discipline (v11)** | **whiff/chase/zone_contact/zone_swing/called_strike/first_pitch_swing/two_strike_whiff** | **whiff/chase_induced/csw/zone_rate/edge_rate/first_pitch_strike** |
+| **BQ Batted Ball (v11)** | **GB/FB/LD/popup rate/sweet_spot/avg_hit_distance** | **GB/FB induced/EV against/barrel against/hard_hit against/xwOBA against** |
+| **BQ Power (v11)** | **avg/max/p90 EV/EV consistency/hard_hit/barrel rate** | — |
+| **BQ Stuff (v11)** | — | **velo/spin/movement/extension/arm_angle/FB detail/BRK detail/CH detail/velo diff** |
+| **BQ Fatigue (v11)** | — | **TTO別 run value (1st/2nd/3rd)/degradation** |
+| **BQ Run Value (v11)** | **avg_run_value/xwOBA/xBA/count_leverage** | **pitcher_run_value/FB・BRK・CH別 run value** |
+| **BQ Pitch Mix (v11)** | **velo_faced/fastball%/breaking%/offspeed% faced** | **fastball%/breaking%/offspeed% thrown** |
+| **BQ Bat Tracking (v11)** | **bat_speed/swing_length/attack_angle/consistency/max** | — |
+| **BQ Baserunning (v11)** | **SB success rate/SB attempt rate** | — |
+| Lag delta | wOBA/xwOBA/K%/BB%/brl/bat_speed + **BQ whiff/chase/EV/barrel/LD delta** | xFIP/K%/BB%/K-BB%/whiff/entropy + **BQ velo/spin/whiff/zone/EV/GB delta** |
 | Interaction | age_x_luck（Age × xwOBA-wOBA乖離） | age_x_kbb（Age × K-BB%） |
 | Engineered | age_from_peak/age_sq/pa_rate/xwoba_luck/park_factor/team_changed | age_from_peak/age_sq/ip_rate/fip_era_gap/park_factor/team_changed |
 | Stacking | lgb_delta / cat_delta | lgb_delta / cat_delta |
@@ -202,7 +216,7 @@ develop ─→  baseball-mlops-dev.streamlit.app  （開発・検証）
 
 - `develop` で Spring Training 検証・UI 改善・モデル改善を試す
 - 安定したら `master` に merge して本番反映
-- Spring Training データは毎日 JST 23:00 に `develop` へ自動コミット
+- Spring Training データの自動コミット — **一時停止中**
 
 ---
 
@@ -290,7 +304,7 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 | **Marcel 重みの MLB 最適化** | 現在 Tango 原典値（5/4/3、REG_PA=1200）を使用。NPB では最適化で MAE 1.4% 改善実績あり。MLB Statcast 期（2015〜）データでグリッドサーチ + ブートストラップ検定で再評価する | ベースライン精度向上 |
 | **Neural Network（TabNet / FT-Transformer）** | テーブルデータ向け深層学習。LGB/Cat とは異なる非線形パターンを学習 | アンサンブル多様性向上 |
 | **Similarity-Based Prediction** | 過去の類似選手キャリアパスから予測（PECOTA original approach） | 急激な衰退・ブレイクアウト検出 |
-| **Pitch-Level Features** | 球種別 Stuff+ / Location+ をピッチレベルで集約 | 投手予測の精度向上 |
+| ~~**Pitch-Level Features**~~ | ~~球種別 Stuff+ / Location+ をピッチレベルで集約~~ | **v11 で実装済み** — BQ pitch-level 集計 |
 | **Platoon Splits** | 対左/対右の成績差を特徴量に追加 | プラトーン選手の精度向上 |
 | **Injury / Workload Features** | IL 日数・前年投球数・WAR推移から故障リスクを加味 | 稼働率の予測 |
 | **Bayesian Hyperparameter Transfer** | 前週の Optuna best_params を初期値に warm-start | 学習時間短縮 |

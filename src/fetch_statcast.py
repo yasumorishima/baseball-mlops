@@ -311,9 +311,20 @@ def build_batter_features() -> pd.DataFrame:
             sc = sc.merge(bb[bb_cols], on=["player", "season"], how="left")
 
     merged = fg.merge(sc, on=["player", "season"], how="left")
+
+    # BQ pitch-level aggregated features (from fetch_bq_features.py)
+    bq_path = DATA_DIR / "bq_batter_features.csv"
+    if bq_path.exists():
+        bq = pd.read_csv(bq_path)
+        bq_cols = ["player", "season"] + [c for c in bq.columns if c.startswith("bq_")]
+        bq_cols = [c for c in bq_cols if c in bq.columns]
+        merged = merged.merge(bq[bq_cols], on=["player", "season"], how="left")
+        n_bq = merged[[c for c in merged.columns if c.startswith("bq_")]].notna().any(axis=1).sum()
+        print(f"  BQ features merged: {n_bq}/{len(merged)} rows matched")
+
     out_path = DATA_DIR / "batter_features.csv"
     merged.to_csv(out_path, index=False)
-    print(f"Batter features: {len(merged)} rows, cols sample: {list(merged.columns[:8])}")
+    print(f"Batter features: {len(merged)} rows, {len(merged.columns)} cols")
     return merged
 
 
@@ -369,9 +380,20 @@ def build_pitcher_features() -> pd.DataFrame:
         sc = sc.merge(arsenal_agg, on=["player", "season"], how="left")
 
     merged = fg.merge(sc, on=["player", "season"], how="left")
+
+    # BQ pitch-level aggregated features (from fetch_bq_features.py)
+    bq_path = DATA_DIR / "bq_pitcher_features.csv"
+    if bq_path.exists():
+        bq = pd.read_csv(bq_path)
+        bq_cols = ["player", "season"] + [c for c in bq.columns if c.startswith("bq_")]
+        bq_cols = [c for c in bq_cols if c in bq.columns]
+        merged = merged.merge(bq[bq_cols], on=["player", "season"], how="left")
+        n_bq = merged[[c for c in merged.columns if c.startswith("bq_")]].notna().any(axis=1).sum()
+        print(f"  BQ features merged: {n_bq}/{len(merged)} rows matched")
+
     out_path = DATA_DIR / "pitcher_features.csv"
     merged.to_csv(out_path, index=False)
-    print(f"Pitcher features: {len(merged)} rows, cols sample: {list(merged.columns[:8])}")
+    print(f"Pitcher features: {len(merged)} rows, {len(merged.columns)} cols")
     return merged
 
 
@@ -397,6 +419,15 @@ if __name__ == "__main__":
     fetch_pitching_exitvelo()
     fetch_pitching_expected()
     fetch_pitcher_arsenal()    # NEW
+
+    # BQ pitch-level features (optional — requires GCP credentials)
+    try:
+        from fetch_bq_features import fetch_batter_bq_features, fetch_pitcher_bq_features
+        fetch_batter_bq_features()
+        fetch_pitcher_bq_features()
+    except Exception as e:
+        print(f"BQ feature fetch skipped: {e}")
+
     build_batter_features()
     build_pitcher_features()
     print("All done.")

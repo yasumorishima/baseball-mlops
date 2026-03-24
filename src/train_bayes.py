@@ -55,18 +55,56 @@ MCMC_SEED = 42
 # Skill-group feature definitions
 # ---------------------------------------------------------------------------
 
-# BATTER: 4 skill groups
+# BATTER: 8 skill groups (4 original + 4 BQ pitch-level)
 BAT_CONTACT = ["brl_percent", "avg_hit_speed", "HardHit%", "maxEV", "avg_bat_speed"]
 BAT_DISCIPLINE = ["K%", "BB%", "O-Swing%", "Contact%", "SwStr%"]
 BAT_EXPECTED = ["xwOBA", "ev95percent", "BABIP"]
 BAT_CONTEXT = ["park_factor", "pa_rate", "team_changed", "g_change_rate"]
+# v11: BQ pitch-level aggregated
+BAT_APPROACH_BQ = [
+    "bq_whiff_rate", "bq_chase_rate", "bq_zone_contact_rate",
+    "bq_zone_swing_rate", "bq_called_strike_rate",
+    "bq_first_pitch_swing_rate",
+]
+BAT_BATTED_BALL_BQ = [
+    "bq_gb_rate", "bq_fb_rate", "bq_ld_rate",
+    "bq_sweet_spot_rate", "bq_popup_rate", "bq_avg_hit_distance",
+]
+BAT_POWER_BQ = [
+    "bq_avg_ev", "bq_max_ev", "bq_ev_p90",
+    "bq_hard_hit_rate", "bq_barrel_rate",
+]
+BAT_RUN_VALUE_BQ = [
+    "bq_avg_run_value", "bq_avg_xwoba", "bq_avg_xba",
+    "bq_hitter_count_pct",
+]
 
-# PITCHER: 5 skill groups
+# PITCHER: 9 skill groups (5 original + 4 BQ pitch-level)
 PIT_STUFF = ["K%", "Stuff+", "SwStr%", "best_whiff", "avg_whiff_weighted"]
 PIT_COMMAND = ["BB%", "Location+", "CSW%", "K-BB%"]
 PIT_CONTACT_MGMT = ["brl_percent", "avg_hit_speed", "HardHit%", "est_woba"]
 PIT_ARSENAL = ["n_pitch_types", "usage_entropy"]
 PIT_CONTEXT = ["park_factor", "ip_rate", "team_changed", "g_change_rate"]
+# v11: BQ pitch-level aggregated
+PIT_VELO_BQ = [
+    "bq_avg_velo", "bq_max_velo", "bq_velo_consistency",
+    "bq_fb_velo", "bq_fb_spin", "bq_fb_rise", "bq_avg_extension",
+]
+PIT_COMMAND_BQ = [
+    "bq_zone_rate", "bq_first_pitch_strike_rate",
+    "bq_whiff_rate", "bq_chase_rate_induced",
+    "bq_location_x_consistency", "bq_release_x_consistency",
+    "bq_release_z_consistency",
+]
+PIT_CONTACT_BQ = [
+    "bq_avg_ev_against", "bq_hard_hit_rate_against",
+    "bq_barrel_rate_against", "bq_gb_rate_induced",
+    "bq_avg_xwoba_against",
+]
+PIT_FATIGUE_BQ = [
+    "bq_rv_1st_time", "bq_rv_2nd_time", "bq_rv_3rd_time",
+    "bq_tto_degradation",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -816,6 +854,11 @@ def run():
         "discipline": BAT_DISCIPLINE,
         "expected": BAT_EXPECTED,
         "context": BAT_CONTEXT,
+        # v11: BQ pitch-level
+        "approach_bq": BAT_APPROACH_BQ,
+        "batted_ball_bq": BAT_BATTED_BALL_BQ,
+        "power_bq": BAT_POWER_BQ,
+        "run_value_bq": BAT_RUN_VALUE_BQ,
     }
     pit_skill_groups = {
         "stuff": PIT_STUFF,
@@ -823,6 +866,11 @@ def run():
         "contact_mgmt": PIT_CONTACT_MGMT,
         "arsenal": PIT_ARSENAL,
         "context": PIT_CONTEXT,
+        # v11: BQ pitch-level
+        "velo_bq": PIT_VELO_BQ,
+        "command_bq": PIT_COMMAND_BQ,
+        "contact_bq": PIT_CONTACT_BQ,
+        "fatigue_bq": PIT_FATIGUE_BQ,
     }
 
     log_dict = {}
@@ -862,10 +910,13 @@ def run():
 
             # Extract posterior summaries
             param_names = [
-                "sigma_alpha", "tau_contact", "tau_discipline", "tau_expected", "tau_context",
+                "sigma_alpha",
+                "tau_contact", "tau_discipline", "tau_expected", "tau_context",
+                "tau_approach_bq", "tau_batted_ball_bq", "tau_power_bq", "tau_run_value_bq",
                 "beta_age", "beta_age2", "beta_lgb", "beta_cat",
                 "sigma_base", "gamma_pa",
                 "beta_contact", "beta_discipline", "beta_expected", "beta_context",
+                "beta_approach_bq", "beta_batted_ball_bq", "beta_power_bq", "beta_run_value_bq",
             ]
             summary_bat = _extract_posterior_summary(fit_bat, param_names)
 
@@ -958,12 +1009,15 @@ def run():
             fit_pit = _run_stan("pitcher_hierarchical.stan", stan_data_pit, cmdstanpy)
 
             param_names_pit = [
-                "sigma_alpha", "tau_stuff", "tau_command", "tau_contact_mgmt",
+                "sigma_alpha",
+                "tau_stuff", "tau_command", "tau_contact_mgmt",
                 "tau_arsenal", "tau_context",
+                "tau_velo_bq", "tau_command_bq", "tau_contact_bq", "tau_fatigue_bq",
                 "beta_age", "beta_age2", "beta_lgb", "beta_cat",
                 "sigma_base", "gamma_ip",
                 "beta_stuff", "beta_command", "beta_contact_mgmt",
                 "beta_arsenal", "beta_context",
+                "beta_velo_bq", "beta_command_bq", "beta_contact_bq", "beta_fatigue_bq",
             ]
             summary_pit = _extract_posterior_summary(fit_pit, param_names_pit)
 
