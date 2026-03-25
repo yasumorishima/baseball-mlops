@@ -13,6 +13,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 | 本番 Dashboard | https://baseball-mlops.streamlit.app/ | Streamlit Cloud |
 | 開発 Dashboard | https://baseball-mlops-dev.streamlit.app/ | Spring Training 検証 |
 | データ基盤 | BigQuery `data-platform-490901.mlb_statcast` | 生データ + BQML モデル |
+| 共有データ基盤 | [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) | FanGraphs / Savant / Statcast 共有 BQ テーブル |
 | Grafana | [MLB Statcast Predictions](https://yasumorishima.grafana.net/public-dashboards/4089c1bbd6834f2082921329219b5b44) | 予測分布・バックテスト・モデル比較 |
 
 ![MLB Statcast Predictions — Grafana Dashboard](docs/images/grafana-preview.png)
@@ -126,6 +127,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 
 [BigQuery — data-platform-490901.mlb_statcast]
   生 Statcast データ 13テーブル + 予測結果 + BQML モデル + メトリクス履歴
+  ※ FanGraphs / Savant 生データは mlb-data-pipeline (mlb_shared) から取得
   分析用ビュー 7本（打球品質リーダーボード、投手球種戦略分析 等）
 
 [Streamlit — 本番 / 開発 2 環境]
@@ -320,8 +322,8 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 | 項目 | 概要 |
 |---|---|
 | **Minor League Statcast** | MiLB Hawk-Eye データ（取得可能になり次第） |
-| **Catcher Framing** | 捕手フレーミング指標の投手特徴量への反映 |
-| **Defensive Metrics** | OAA / DRS をポジション別に取得 |
+| ~~**Catcher Framing**~~ | ~~捕手フレーミング指標~~ → **mlb-data-pipeline 経由で取得済み（`mlb_shared.catcher`）** |
+| ~~**Defensive Metrics**~~ | ~~OAA / DRS をポジション別に取得~~ → **mlb-data-pipeline 経由で取得済み（`mlb_shared.oaa`）** |
 
 ### インフラ・運用
 | 項目 | 概要 |
