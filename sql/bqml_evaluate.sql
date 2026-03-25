@@ -8,8 +8,8 @@ SELECT
   'bqml_batter_boosted_tree' AS model,
   *
 FROM ML.EVALUATE(
-  MODEL `data-platform-490901.mlb_statcast.bqml_batter_woba`,
-  (SELECT * FROM `data-platform-490901.mlb_statcast.v_batter_train` WHERE is_eval = TRUE)
+  MODEL `data-platform-490901.mlb_shared.bqml_batter_woba`,
+  (SELECT * FROM `data-platform-490901.mlb_shared.v_batter_train` WHERE is_eval = TRUE)
 );
 
 -- ============================================================
@@ -19,8 +19,8 @@ SELECT
   'bqml_batter_linear' AS model,
   *
 FROM ML.EVALUATE(
-  MODEL `data-platform-490901.mlb_statcast.bqml_batter_woba_linear`,
-  (SELECT * FROM `data-platform-490901.mlb_statcast.v_batter_train` WHERE is_eval = TRUE)
+  MODEL `data-platform-490901.mlb_shared.bqml_batter_woba_linear`,
+  (SELECT * FROM `data-platform-490901.mlb_shared.v_batter_train` WHERE is_eval = TRUE)
 );
 
 -- ============================================================
@@ -30,8 +30,8 @@ SELECT
   'bqml_pitcher_boosted_tree' AS model,
   *
 FROM ML.EVALUATE(
-  MODEL `data-platform-490901.mlb_statcast.bqml_pitcher_xfip`,
-  (SELECT * FROM `data-platform-490901.mlb_statcast.v_pitcher_train` WHERE is_eval = TRUE)
+  MODEL `data-platform-490901.mlb_shared.bqml_pitcher_xfip`,
+  (SELECT * FROM `data-platform-490901.mlb_shared.v_pitcher_train` WHERE is_eval = TRUE)
 );
 
 -- ============================================================
@@ -41,8 +41,8 @@ SELECT
   'bqml_pitcher_linear' AS model,
   *
 FROM ML.EVALUATE(
-  MODEL `data-platform-490901.mlb_statcast.bqml_pitcher_xfip_linear`,
-  (SELECT * FROM `data-platform-490901.mlb_statcast.v_pitcher_train` WHERE is_eval = TRUE)
+  MODEL `data-platform-490901.mlb_shared.bqml_pitcher_xfip_linear`,
+  (SELECT * FROM `data-platform-490901.mlb_shared.v_pitcher_train` WHERE is_eval = TRUE)
 );
 
 -- ============================================================
@@ -53,18 +53,18 @@ WITH bqml_preds AS (
   SELECT
     player, season, predicted_target_woba AS bqml_woba
   FROM ML.PREDICT(
-    MODEL `data-platform-490901.mlb_statcast.bqml_batter_woba`,
-    (SELECT * FROM `data-platform-490901.mlb_statcast.v_batter_train` WHERE is_eval = TRUE)
+    MODEL `data-platform-490901.mlb_shared.bqml_batter_woba`,
+    (SELECT * FROM `data-platform-490901.mlb_shared.v_batter_train` WHERE is_eval = TRUE)
   )
 ),
 actual AS (
   SELECT player, season, wOBA AS actual_woba
-  FROM `data-platform-490901.mlb_statcast.raw_batter_features`
-  WHERE season = (SELECT MAX(season) FROM `data-platform-490901.mlb_statcast.raw_batter_features`)
+  FROM `data-platform-490901.mlb_shared.raw_batter_features`
+  WHERE season = (SELECT MAX(season) FROM `data-platform-490901.mlb_shared.raw_batter_features`)
 ),
 python_preds AS (
   SELECT player, ensemble_woba, marcel_woba
-  FROM `data-platform-490901.mlb_statcast.batter_predictions`
+  FROM `data-platform-490901.mlb_shared.batter_predictions`
 )
 SELECT
   'batter_comparison' AS comparison,
@@ -84,18 +84,18 @@ WITH bqml_preds AS (
   SELECT
     player, season, predicted_target_xfip AS bqml_xfip
   FROM ML.PREDICT(
-    MODEL `data-platform-490901.mlb_statcast.bqml_pitcher_xfip`,
-    (SELECT * FROM `data-platform-490901.mlb_statcast.v_pitcher_train` WHERE is_eval = TRUE)
+    MODEL `data-platform-490901.mlb_shared.bqml_pitcher_xfip`,
+    (SELECT * FROM `data-platform-490901.mlb_shared.v_pitcher_train` WHERE is_eval = TRUE)
   )
 ),
 actual AS (
   SELECT player, season, xFIP AS actual_xfip
-  FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
-  WHERE season = (SELECT MAX(season) FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`)
+  FROM `data-platform-490901.mlb_shared.raw_pitcher_features`
+  WHERE season = (SELECT MAX(season) FROM `data-platform-490901.mlb_shared.raw_pitcher_features`)
 ),
 python_preds AS (
   SELECT player, ensemble_xfip, marcel_xfip
-  FROM `data-platform-490901.mlb_statcast.pitcher_predictions`
+  FROM `data-platform-490901.mlb_shared.pitcher_predictions`
 )
 SELECT
   'pitcher_comparison' AS comparison,

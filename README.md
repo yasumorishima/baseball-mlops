@@ -12,7 +12,7 @@ Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuer
 | 本番 API | Cloud Run (`baseball-mlops-api`) | FastAPI サーバーレス推論 |
 | 本番 Dashboard | https://baseball-mlops.streamlit.app/ | Streamlit Cloud |
 | 開発 Dashboard | https://baseball-mlops-dev.streamlit.app/ | Spring Training 検証 |
-| データ基盤 | BigQuery `data-platform-490901.mlb_statcast` | 生データ + BQML モデル |
+| データ基盤 | BigQuery `data-platform-490901.mlb_shared` | 生データ + BQML モデル |
 | 共有データ基盤 | [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) | FanGraphs / Savant / Statcast 共有 BQ テーブル |
 | Grafana | [MLB Statcast Predictions](https://yasumorishima.grafana.net/public-dashboards/4089c1bbd6834f2082921329219b5b44) | 予測分布・バックテスト・モデル比較 |
 
@@ -103,7 +103,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 [GitHub Actions — 毎週月曜 JST 11:00]
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
-  ↓ fetch_bq_features.py   BigQuery mlb_wp.statcast_pitches (6.8M rows) →
+  ↓ fetch_bq_features.py   BigQuery mlb_shared.statcast_pitches (6.8M rows) →
                            選手×シーズン集計 (打者40+/投手50+特徴量)
   ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
   ↓ train_catboost.py      CatBoost — Optuna 60 trials + MedianPruner + 異なる分割戦略
@@ -125,7 +125,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
   起動時 + 6 時間ごとに W&B production モデルを自動ロード
   POST /model/reload で即時反映も可能
 
-[BigQuery — data-platform-490901.mlb_statcast]
+[BigQuery — data-platform-490901.mlb_shared]
   生 Statcast データ 13テーブル + 予測結果 + BQML モデル + メトリクス履歴
   ※ FanGraphs / Savant 生データは mlb-data-pipeline (mlb_shared) から取得
   分析用ビュー 7本（打球品質リーダーボード、投手球種戦略分析 等）
@@ -142,7 +142,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | 球団 AWS 基盤 | 本プロジェクト GCP 基盤 | 対応関係 |
 |---|---|---|
 | TrackMan / Hawk-Eye | pybaseball Statcast（同一トラッキングデータ） | データソース |
-| S3 (raw data lake) | BigQuery `mlb_statcast` 生データ 13 テーブル | データレイク |
+| S3 (raw data lake) | BigQuery `mlb_shared` 生データ 13 テーブル | データレイク |
 | Airflow DAG | GitHub Actions `weekly_retrain.yml` | オーケストレーション |
 | SageMaker Processing Job | RPi5 self-hosted runner（Python 学習） | バッチ学習 |
 | SageMaker Batch Transform | BigQuery ML `CREATE MODEL`（SQL ML） | SQL モデル学習 |
@@ -177,7 +177,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 - **スキル群別階層正則化**: 特徴量をドメイン知識で **10群（打者）/ 12群（投手）** に分類し、群ごとに正則化スケール τ を推定
   - 打者 (10群): Contact / Discipline / Expected / Context / **Offense** (wRC+/WAR/Off/OPS/wRAA/HR/FB) / **Batted Ball FG** (GB%/FB%/LD%/IFFB%/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%) / **Approach BQ** (whiff/chase/zone contact/zone swing/called strike/first pitch swing) / **Batted Ball BQ** (GB/FB/LD/popup/sweet spot/距離) / **Power BQ** (EV avg/max/p90/hard hit/barrel) / **Run Value BQ** (run value/xwOBA/xBA/count leverage)
   - 投手 (12群): Stuff (K%/Stuff+/Pitching+/SwStr%) / Command (BB%/Location+/CSW%/O-Swing%/Z-Contact%/Zone%) / Contact Mgmt / Arsenal / Context / **ERA Models** (SIERA/ERA-/FIP-/xFIP-/WAR) / **Batted Ball FG** (GB%/FB%/LD%/HR/FB/Pull%/Cent%/Oppo%/Soft%/Med%/Hard%) / **Role** (GS/Start-IP/Relief-IP) / **Velo BQ** / **Command BQ** / **Contact BQ** / **Fatigue BQ**
-- **BQ データソース**: `mlb_wp.statcast_pitches`（6.8M 行 × 122 列、2015-2024）→ SQL で選手×シーズン集計
+- **BQ データソース**: `mlb_shared.statcast_pitches`（6.8M 行 × 122 列、2015-2024）→ SQL で選手×シーズン集計
 - **スタッキング**: LGB/CatBoost OOF delta を Bayes 事前分布 N(0.3, 0.2) / N(0.2, 0.2) でメタ学習
 - **異分散ノイズ**: σ(PA) = σ_base × exp(γ × z_log_pa) — 低PAで広い信用区間
 - **加齢曲線**: 二次（β_age + β_age2 × age²）— ピーク27歳、30歳以降加速的衰退
@@ -246,7 +246,7 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 | Item | Value |
 |---|---|
 | Project | `data-platform-490901` |
-| Dataset | `mlb_statcast` |
+| Dataset | `mlb_shared` |
 
 ### Raw Data Tables (weekly auto-refresh)
 

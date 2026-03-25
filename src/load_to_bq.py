@@ -23,7 +23,7 @@ import pandas as pd
 from google.cloud import bigquery
 
 PROJECT_ID = "data-platform-490901"
-DATASET_ID = "mlb_statcast"
+DATASET_ID = "mlb_shared"
 FULL_DATASET = f"{PROJECT_ID}.{DATASET_ID}"
 
 RAW_DIR = Path(__file__).parent.parent / "data" / "raw"

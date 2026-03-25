@@ -1,7 +1,7 @@
 """
 BigQuery pitch-level Statcast → player×season aggregated features.
 
-Reads from mlb_wp.statcast_pitches (6.8M rows, 122 columns, 2015-2024)
+Reads from mlb_shared.statcast_pitches (6.8M rows, 122 columns, 2015-2024)
 and aggregates ALL usable pitch-level columns to player×season level.
 
 Feature domains:
@@ -27,7 +27,7 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT = "data-platform-490901"
-DATASET = "mlb_wp"
+DATASET = "mlb_shared"
 TABLE = "statcast_pitches"
 TABLE_REF = f"`{PROJECT}.{DATASET}.{TABLE}`"
 

@@ -4,7 +4,7 @@
 -- ============================================================
 -- 1. 選手年度別 wOBA トレンド（打者パフォーマンス推移）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batter_trend` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_batter_trend` AS
 SELECT
   player,
   season,
@@ -26,14 +26,14 @@ SELECT
   avg_hit_speed - LAG(avg_hit_speed) OVER (PARTITION BY player ORDER BY season) AS ev_yoy,
   -- xwOBA - wOBA 乖離（運要素の指標）
   xwOBA - wOBA AS luck_factor
-FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+FROM `data-platform-490901.mlb_shared.raw_batter_features`
 ORDER BY player, season;
 
 
 -- ============================================================
 -- 2. 選手年度別 xFIP トレンド（投手パフォーマンス推移）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_pitcher_trend` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_pitcher_trend` AS
 SELECT
   player,
   season,
@@ -55,14 +55,14 @@ SELECT
   `K_pct` - LAG(`K_pct`) OVER (PARTITION BY player ORDER BY season) AS K_pct_yoy,
   -- FIP-ERA 乖離（運要素）
   ERA - FIP AS era_fip_gap
-FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
+FROM `data-platform-490901.mlb_shared.raw_pitcher_features`
 ORDER BY player, season;
 
 
 -- ============================================================
 -- 3. Statcast 打球品質リーダーボード（シーズン別）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batted_ball_leaders` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_batted_ball_leaders` AS
 SELECT
   player,
   season,
@@ -79,7 +79,7 @@ SELECT
   wOBA,
   xwOBA,
   PA
-FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+FROM `data-platform-490901.mlb_shared.raw_batter_features`
 WHERE PA >= 100
 ORDER BY avg_hit_speed DESC;
 
@@ -87,7 +87,7 @@ ORDER BY avg_hit_speed DESC;
 -- ============================================================
 -- 4. 投手球種戦略分析（Arsenal 集約）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_pitcher_arsenal` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_pitcher_arsenal` AS
 SELECT
   player,
   season,
@@ -103,7 +103,7 @@ SELECT
     WHEN n_pitch_types <= 3 AND primary_usage > 0.6 THEN 'specialist'
     ELSE 'balanced'
   END AS arsenal_type
-FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
+FROM `data-platform-490901.mlb_shared.raw_pitcher_features`
 WHERE n_pitch_types IS NOT NULL
 ORDER BY usage_entropy DESC;
 
@@ -111,7 +111,7 @@ ORDER BY usage_entropy DESC;
 -- ============================================================
 -- 5. 球場補正効果分析
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_park_effects` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_park_effects` AS
 SELECT
   team,
   season,
@@ -121,7 +121,7 @@ SELECT
     WHEN pf_5yr < 95 THEN 'pitcher_park'
     ELSE 'neutral'
   END AS park_type
-FROM `data-platform-490901.mlb_statcast.raw_park_factors`
+FROM `data-platform-490901.mlb_shared.raw_park_factors`
 ORDER BY season DESC, pf_5yr DESC;
 
 
@@ -130,22 +130,22 @@ ORDER BY season DESC, pf_5yr DESC;
 -- ============================================================
 -- model_metrics_history は append 運用のため、初回 Run で列が未定義の場合がある。
 -- SELECT * で全列を取得し、カラム追加に自動対応する。
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_model_comparison` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_model_comparison` AS
 SELECT *
-FROM `data-platform-490901.mlb_statcast.model_metrics_history`
+FROM `data-platform-490901.mlb_shared.model_metrics_history`
 ORDER BY run_date DESC;
 
 
 -- ============================================================
 -- 7. シーズン別データ量サマリー
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_data_coverage` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_data_coverage` AS
 SELECT
   season,
   COUNT(DISTINCT player) AS n_batters,
   AVG(PA) AS avg_pa,
   COUNT(DISTINCT CASE WHEN avg_bat_speed IS NOT NULL THEN player END) AS n_bat_tracking,
   COUNT(DISTINCT CASE WHEN pull_rate IS NOT NULL THEN player END) AS n_batted_ball
-FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+FROM `data-platform-490901.mlb_shared.raw_batter_features`
 GROUP BY season
 ORDER BY season;

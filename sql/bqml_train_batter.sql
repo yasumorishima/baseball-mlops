@@ -8,7 +8,7 @@
 -- ============================================================
 -- Step 1: 学習用ビュー（ラグ特徴量 + ターゲット）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_batter_train` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_batter_train` AS
 WITH base AS (
   SELECT
     player,
@@ -28,7 +28,7 @@ WITH base AS (
     pull_rate, oppo_rate,
     -- Basic
     Age, PA, Team
-  FROM `data-platform-490901.mlb_statcast.raw_batter_features`
+  FROM `data-platform-490901.mlb_shared.raw_batter_features`
   WHERE PA >= 50
 ),
 lagged AS (
@@ -115,7 +115,7 @@ lagged AS (
     END AS team_changed,
 
     -- 時系列CV用: 最新年をeval
-    CASE WHEN season = (SELECT MAX(season) - 1 FROM `data-platform-490901.mlb_statcast.raw_batter_features`)
+    CASE WHEN season = (SELECT MAX(season) - 1 FROM `data-platform-490901.mlb_shared.raw_batter_features`)
       THEN TRUE ELSE FALSE
     END AS is_eval
 
@@ -130,7 +130,7 @@ WHERE wOBA_y1 IS NOT NULL  -- 最低1年の過去データが必要
 -- ============================================================
 -- Step 2: Boosted Tree Regressor
 -- ============================================================
-CREATE OR REPLACE MODEL `data-platform-490901.mlb_statcast.bqml_batter_woba`
+CREATE OR REPLACE MODEL `data-platform-490901.mlb_shared.bqml_batter_woba`
 OPTIONS(
   model_type = 'BOOSTED_TREE_REGRESSOR',
   input_label_cols = ['target_woba'],
@@ -171,14 +171,14 @@ SELECT
   target_woba,
   -- split
   is_eval
-FROM `data-platform-490901.mlb_statcast.v_batter_train`
+FROM `data-platform-490901.mlb_shared.v_batter_train`
 ;
 
 
 -- ============================================================
 -- Step 3: 線形回帰 (ベースライン比較用)
 -- ============================================================
-CREATE OR REPLACE MODEL `data-platform-490901.mlb_statcast.bqml_batter_woba_linear`
+CREATE OR REPLACE MODEL `data-platform-490901.mlb_shared.bqml_batter_woba_linear`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['target_woba'],
@@ -195,5 +195,5 @@ SELECT
   wOBA_delta_1, age_from_peak, age_sq, pa_rate, xwoba_luck, team_changed,
   target_woba,
   is_eval
-FROM `data-platform-490901.mlb_statcast.v_batter_train`
+FROM `data-platform-490901.mlb_shared.v_batter_train`
 ;

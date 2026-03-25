@@ -7,7 +7,7 @@
 -- ============================================================
 -- Step 1: 学習用ビュー（ラグ特徴量 + ターゲット）
 -- ============================================================
-CREATE OR REPLACE VIEW `data-platform-490901.mlb_statcast.v_pitcher_train` AS
+CREATE OR REPLACE VIEW `data-platform-490901.mlb_shared.v_pitcher_train` AS
 WITH base AS (
   SELECT
     player,
@@ -24,7 +24,7 @@ WITH base AS (
     avg_whiff_weighted, best_rv100, usage_entropy,
     -- Basic
     Age, IP, Team
-  FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`
+  FROM `data-platform-490901.mlb_shared.raw_pitcher_features`
   WHERE IP >= 30
 ),
 lagged AS (
@@ -104,7 +104,7 @@ lagged AS (
     END AS team_changed,
 
     -- 時系列CV用: 最新年をeval
-    CASE WHEN season = (SELECT MAX(season) - 1 FROM `data-platform-490901.mlb_statcast.raw_pitcher_features`)
+    CASE WHEN season = (SELECT MAX(season) - 1 FROM `data-platform-490901.mlb_shared.raw_pitcher_features`)
       THEN TRUE ELSE FALSE
     END AS is_eval
 
@@ -119,7 +119,7 @@ WHERE xFIP_y1 IS NOT NULL  -- 最低1年の過去データが必要
 -- ============================================================
 -- Step 2: Boosted Tree Regressor
 -- ============================================================
-CREATE OR REPLACE MODEL `data-platform-490901.mlb_statcast.bqml_pitcher_xfip`
+CREATE OR REPLACE MODEL `data-platform-490901.mlb_shared.bqml_pitcher_xfip`
 OPTIONS(
   model_type = 'BOOSTED_TREE_REGRESSOR',
   input_label_cols = ['target_xfip'],
@@ -160,14 +160,14 @@ SELECT
   target_xfip,
   -- split
   is_eval
-FROM `data-platform-490901.mlb_statcast.v_pitcher_train`
+FROM `data-platform-490901.mlb_shared.v_pitcher_train`
 ;
 
 
 -- ============================================================
 -- Step 3: 線形回帰 (ベースライン比較用)
 -- ============================================================
-CREATE OR REPLACE MODEL `data-platform-490901.mlb_statcast.bqml_pitcher_xfip_linear`
+CREATE OR REPLACE MODEL `data-platform-490901.mlb_shared.bqml_pitcher_xfip_linear`
 OPTIONS(
   model_type = 'LINEAR_REG',
   input_label_cols = ['target_xfip'],
@@ -184,5 +184,5 @@ SELECT
   xFIP_delta_1, age_from_peak, age_sq, ip_rate, fip_era_gap, team_changed,
   target_xfip,
   is_eval
-FROM `data-platform-490901.mlb_statcast.v_pitcher_train`
+FROM `data-platform-490901.mlb_shared.v_pitcher_train`
 ;

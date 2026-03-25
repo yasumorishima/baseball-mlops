@@ -21,7 +21,7 @@ from pathlib import Path
 from google.cloud import bigquery
 
 PROJECT_ID = "data-platform-490901"
-DATASET_ID = "mlb_statcast"
+DATASET_ID = "mlb_shared"
 SQL_DIR = Path(__file__).parent.parent / "sql"
 PRED_DIR = Path(__file__).parent.parent / "predictions"
 

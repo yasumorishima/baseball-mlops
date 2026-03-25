@@ -136,7 +136,7 @@ BATTER_FEATURES = [
     # v8: Batted ball direction
     "pull_rate", "oppo_rate",
     # ====================================================================
-    # v11: BQ pitch-level aggregated features (from mlb_wp.statcast_pitches)
+    # v11: BQ pitch-level aggregated features (from mlb_shared.statcast_pitches)
     # ====================================================================
     # Plate discipline (pitch selection quality)
     "bq_whiff_rate", "bq_chase_rate", "bq_zone_contact_rate",
@@ -196,7 +196,7 @@ PITCHER_FEATURES = [
     "n_pitch_types", "primary_usage", "best_whiff",
     "avg_whiff_weighted", "best_rv100", "usage_entropy",
     # ====================================================================
-    # v11: BQ pitch-level aggregated features (from mlb_wp.statcast_pitches)
+    # v11: BQ pitch-level aggregated features (from mlb_shared.statcast_pitches)
     # ====================================================================
     # Stuff (velocity, spin, movement)
     "bq_avg_velo", "bq_max_velo", "bq_velo_consistency",
