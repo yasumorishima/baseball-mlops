@@ -328,6 +328,7 @@ All Statcast raw data, predictions, and BQML models are stored in BigQuery (free
 ### インフラ・運用
 | 項目 | 概要 |
 |---|---|
+| ~~**共有データ基盤**~~ | ~~FanGraphs / Savant データを mlb-win-probability と統一~~ → **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築済み（2026-03-25）。参照先切り替え待ち** |
 | **BQML アンサンブル統合** | BQML Boosted Tree の精度が Python 版に迫れば、Cloud Run API で BQML 予測も返す |
 | **BigQuery Scheduled Query** | BigQuery 上で定期分析クエリを自動実行し、ダッシュボードに反映 |
 | **A/B テスト基盤** | 新モデルと production モデルを並行評価し自動昇格 |
