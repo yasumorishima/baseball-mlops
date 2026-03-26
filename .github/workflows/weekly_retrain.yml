@@ -37,14 +37,19 @@ jobs:
           CMDSTAN_DIR="$HOME/.cmdstan/cmdstan-${CMDSTAN_VER}"
           echo "CMDSTAN=${CMDSTAN_DIR}" >> "$GITHUB_ENV"
 
+      - name: Setup GCP credentials
+        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
+        continue-on-error: true
+
+      - name: Preflight check (BQ + pybaseball)
+        run: python src/preflight.py
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+
       - name: Fetch Statcast data (incl. bat tracking + arsenal)
         run: python src/fetch_statcast.py
         env:
           PYBASEBALL_CACHE: "1"
-
-      - name: Setup GCP credentials
-        run: echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-sa-key.json
-        continue-on-error: true
 
       - name: Load raw data to BigQuery (early, before training)
         run: python src/load_to_bq.py --raw
@@ -68,7 +73,7 @@ jobs:
         continue-on-error: true
 
       - name: Train LightGBM (Optuna 1000 trials + recency weight)
-        timeout-minutes: 120
+        timeout-minutes: 180
         run: python src/train.py
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
