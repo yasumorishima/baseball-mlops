@@ -85,7 +85,8 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | データ基盤 | BigQuery — 生データ13テーブル + 予測結果 + メトリクス履歴 |
 | 球場補正 | savant-extras で FanGraphs から動的取得（pf_5yr） |
 | 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00）— hosted runner で再開 |
-| **Preflight** | **学習前に BQ 接続・テーブル行数・カラム存在・集計クエリ・API を自動検証** |
+| **Preflight** | **学習前に BQ 接続・テーブル行数・カラム存在・集計クエリ・API を自動検証 + 前回 run ステップ時間分析** |
+| **CI 計測** | **全ステップにタイミング計測 + 80%予算警告、PYTHONUNBUFFERED=1、LightGBM 打者/投手分割（各150min timeout）** |
 | モデル管理 | W&B Model Registry（production タグ自動昇格） |
 | API (本番) | Cloud Run — FastAPI サーバーレスコンテナ（Artifact Registry 経由） |
 | API (開発) | RPi5 Docker（port 8002）— W&B から 6 時間ごとに最新モデルを自動ロード |
@@ -104,11 +105,13 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 [GitHub Actions — 毎週月曜 JST 11:00 (hosted runner)]
   ↓ preflight.py           BQ接続・年カバレッジ・カラム存在・集計クエリ・pybaseball API
                            → 問題あれば即停止 + 詳細デバッグ出力（fuzzy match・SQL・null率等）
+                           → 前回 run の各ステップ実行時間を分析・表示
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
   ↓ fetch_bq_features.py   BigQuery mlb_shared.statcast_pitches (6.8M rows) →
                            選手×シーズン集計 (打者40+/投手50+特徴量)
-  ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
+  ↓ train.py (batter)       LightGBM wOBA — Optuna 1000 trials (150min timeout)
+  ↓ train.py (pitcher)      LightGBM xFIP — Optuna 1000 trials (150min timeout)
   ↓ train_catboost.py      CatBoost — Optuna 60 trials + MedianPruner + 異なる分割戦略
   ↓ train_components.py    PECOTA方式 — K%/BB%/BABIP/ISO(HR/9) 個別予測 → Ridge再構成
   ↓ train_bayes.py         Stan 階層 Bayes — 選手ランダム効果 + スキル群別正則化 + MCMC
@@ -118,6 +121,10 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
   ↓ bqml_train.py          BigQuery ML — Boosted Tree + 線形回帰（SQLだけでML）
   ↓ predictions/ コミット   Streamlit Cloud が直接読み込む
   ↓ Discord 通知           Python + BQML 全モデルMAE詳細つき通知
+
+CI: 全学習ステップにタイミング計測 + 予算警告（80%閾値）を実装。
+    PYTHONUNBUFFERED=1 でリアルタイムログ出力。
+    LightGBM は打者/投手を独立ステップに分割し各150分タイムアウト。
 
 [Cloud Run — baseball-mlops-api（本番 API）]
   FastAPI コンテナをサーバーレスデプロイ
