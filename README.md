@@ -2,7 +2,7 @@
 
 **MLB Statcast × GCP × MLOps — Player performance prediction pipeline**
 
-> **v11 開発中 (2026-03-24):** BigQuery pitch-level Statcast データ（6.8M 行 × 122 列）を選手×シーズンに集計し、打者 8 / 投手 9 スキルグループの階層 Bayes モデルに統合。Weekly auto-retrain は計算環境の見直し後に再開予定。ダッシュボード・API は稼働中です。
+> **v11 開発中 (2026-03-26):** BigQuery pitch-level Statcast データ（6.8M 行 × 122 列）を選手×シーズンに集計し、打者 8 / 投手 9 スキルグループの階層 Bayes モデルに統合。**データ基盤統合完了** — 全 BQ 参照を [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) の `mlb_shared` データセットに切替済み。Weekly auto-retrain は計算環境の見直し後に再開予定。ダッシュボード・API は稼働中です。
 
 MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
 Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuery + BigQuery ML + Cloud Run)** 上で MLOps パイプラインとして継続運用する。
