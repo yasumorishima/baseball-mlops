@@ -212,7 +212,7 @@ jobs:
           BQML_BAT="${{ steps.bqml.outputs.BQML_BAT }}"
           BQML_PIT="${{ steps.bqml.outputs.BQML_PIT }}"
           MEMO="${{ inputs.memo }}"
-          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+          curl -sS -w "\nHTTP %{http_code}\n" -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
@@ -241,7 +241,7 @@ jobs:
         if: failure()
         run: |
           MEMO="${{ inputs.memo }}"
-          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+          curl -sS -w "\nHTTP %{http_code}\n" -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{

@@ -125,7 +125,7 @@ jobs:
           STATUS="${{ job.status }}"
           MEMO="${{ inputs.memo }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo 3066993 || echo 15158332)
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+          curl -sS -w "\nHTTP %{http_code}\n" -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{

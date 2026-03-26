@@ -61,7 +61,7 @@ jobs:
             TITLE="Backtest Analysis Failed"
             COLOR=15158332
           fi
-          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+          curl -sS -w "\nHTTP %{http_code}\n" -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
