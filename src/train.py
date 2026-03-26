@@ -6,8 +6,10 @@ LightGBM 学習 + W&B 記録 + Model Registry 保存
 ベースライン: MLB Marcel法（加重平均 + 平均回帰 + 年齢調整）との比較
 """
 
+import argparse
 import os
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -640,7 +642,6 @@ def train_model(X: pd.DataFrame, y: pd.Series, params: dict,
 
 def save_to_wandb(model, mae: float, target: str, feature_names: list, config: dict):
     """W&B にモデル・メトリクス・特徴量重要度を記録し、MAE が改善したら production タグを昇格"""
-    wandb.login(key=os.environ.get("WANDB_API_KEY"))
     entity = os.environ.get("WANDB_ENTITY") or None
     run = wandb.init(project="baseball-mlops", entity=entity, job_type="train",
                      config={**config, "target": target})
@@ -694,9 +695,18 @@ def save_to_wandb(model, mae: float, target: str, feature_names: list, config: d
 OPTUNA_TRIALS = 1000
 
 
-def run_training():
-    """打者・投手モデルを学習して W&B に記録"""
-    # 打者
+def _log_elapsed(label: str, start: float, budget_min: int = 150):
+    """経過時間をログし、budget の 80% 超過で警告"""
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  ⚠️ WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) — timeout risk!")
+
+
+def _train_batter(budget_min: int = 150):
+    """打者モデル（wOBA）を学習して W&B に記録"""
+    t0 = time.time()
     print("=== Batter (wOBA) ===")
     bat_df = pd.read_csv(RAW_DIR / "batter_features.csv")
     train_bat = build_train_data_batters(bat_df)
@@ -710,6 +720,7 @@ def run_training():
 
     print(f"  Optuna tuning ({OPTUNA_TRIALS} trials) ...")
     best_params_bat = tune_hyperparams(X_bat, y_bat, seasons_bat, n_trials=OPTUNA_TRIALS)
+    _log_elapsed("Optuna batter", t0, budget_min)
     print(f"  best: lr={best_params_bat['learning_rate']:.4f}, "
           f"leaves={best_params_bat['num_leaves']}, "
           f"min_child={best_params_bat['min_child_samples']}")
@@ -717,14 +728,13 @@ def run_training():
     model_bat, mae_bat, _, oof_bat = train_model(
         X_bat, y_bat, best_params_bat, seasons=seasons_bat
     )
+    _log_elapsed("train batter", t0, budget_min)
     print(f"  ML  MAE wOBA: {mae_bat:.4f}")
 
-    # Marcel ベースライン MAE
     marcel_mae_bat = mean_absolute_error(y_bat, train_bat["marcel_woba"].fillna(MLB_AVG_WOBA))
     print(f"  Marcel MAE wOBA: {marcel_mae_bat:.4f}")
 
     # OOF 保存（train_bayes.py のスタッキング用）
-    # time-series CV では先頭2年分は val に入らないため NaN → 除外
     oof_mask_bat = ~np.isnan(oof_bat)
     pd.DataFrame({
         "player": train_bat["player"].values[oof_mask_bat],
@@ -736,8 +746,23 @@ def run_training():
                   {"marcel_mae": marcel_mae_bat, "n_samples": len(X_bat),
                    **{f"bat_{k}": v for k, v in best_params_bat.items()
                       if k in ("learning_rate", "num_leaves", "min_child_samples")}})
+    _log_elapsed("W&B batter", t0, budget_min)
 
-    # 投手
+    # 予測結果を保存
+    bat_df_latest = bat_df[bat_df["season"] == bat_df["season"].max()]
+    bat_preds = _predict_next_season(model_bat, bat_df, bat_df_latest, feat_cols_bat,
+                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA,
+                                     delta_fn=_bat_delta_features)
+    bat_preds.to_csv(PROJ_DIR / "batter_predictions.csv", index=False)
+    bat_preds.to_csv(PRED_DIR / "batter_predictions.csv", index=False)
+    _log_elapsed("batter total", t0, budget_min)
+    print(f"Batter predictions saved: {len(bat_preds)} players")
+    return {"lgb_mae_woba": round(mae_bat, 4), "marcel_mae_woba": round(marcel_mae_bat, 4)}
+
+
+def _train_pitcher(budget_min: int = 150):
+    """投手モデル（xFIP）を学習して W&B に記録"""
+    t0 = time.time()
     print("=== Pitcher (xFIP) ===")
     pit_df = pd.read_csv(RAW_DIR / "pitcher_features.csv")
     train_pit = build_train_data_pitchers(pit_df)
@@ -751,6 +776,7 @@ def run_training():
 
     print(f"  Optuna tuning ({OPTUNA_TRIALS} trials) ...")
     best_params_pit = tune_hyperparams(X_pit, y_pit, seasons_pit, n_trials=OPTUNA_TRIALS)
+    _log_elapsed("Optuna pitcher", t0, budget_min)
     print(f"  best: lr={best_params_pit['learning_rate']:.4f}, "
           f"leaves={best_params_pit['num_leaves']}, "
           f"min_child={best_params_pit['min_child_samples']}")
@@ -758,6 +784,7 @@ def run_training():
     model_pit, mae_pit, _, oof_pit = train_model(
         X_pit, y_pit, best_params_pit, seasons=seasons_pit
     )
+    _log_elapsed("train pitcher", t0, budget_min)
     print(f"  ML  MAE xFIP: {mae_pit:.4f}")
 
     marcel_mae_pit = mean_absolute_error(y_pit, train_pit["marcel_xfip"].fillna(MLB_AVG_XFIP))
@@ -775,29 +802,37 @@ def run_training():
                   {"marcel_mae": marcel_mae_pit, "n_samples": len(X_pit),
                    **{f"pit_{k}": v for k, v in best_params_pit.items()
                       if k in ("learning_rate", "num_leaves", "min_child_samples")}})
+    _log_elapsed("W&B pitcher", t0, budget_min)
 
     # 予測結果を保存
-    bat_df_latest = bat_df[bat_df["season"] == bat_df["season"].max()]
     pit_df_latest = pit_df[pit_df["season"] == pit_df["season"].max()]
-
-    bat_preds = _predict_next_season(model_bat, bat_df, bat_df_latest, feat_cols_bat,
-                                     "wOBA", "pred_woba", marcel_woba, MLB_AVG_WOBA,
-                                     delta_fn=_bat_delta_features)
     pit_preds = _predict_next_season(model_pit, pit_df, pit_df_latest, feat_cols_pit,
                                      "xFIP", "pred_xfip", marcel_xfip, MLB_AVG_XFIP,
                                      delta_fn=_pit_delta_features)
-
-    bat_preds.to_csv(PROJ_DIR / "batter_predictions.csv", index=False)
     pit_preds.to_csv(PROJ_DIR / "pitcher_predictions.csv", index=False)
-    # Streamlit Cloud 用（git 管理対象）にもコピー
-    bat_preds.to_csv(PRED_DIR / "batter_predictions.csv", index=False)
     pit_preds.to_csv(PRED_DIR / "pitcher_predictions.csv", index=False)
-    print(f"Predictions saved: {len(bat_preds)} batters, {len(pit_preds)} pitchers")
+    _log_elapsed("pitcher total", t0, budget_min)
+    print(f"Pitcher predictions saved: {len(pit_preds)} players")
+    return {"lgb_mae_xfip": round(mae_pit, 4), "marcel_mae_xfip": round(marcel_mae_pit, 4)}
 
-    # アンサンブル用に MAE を保存
-    metrics = {"lgb_mae_woba": round(mae_bat, 4), "lgb_mae_xfip": round(mae_pit, 4),
-               "marcel_mae_woba": round(marcel_mae_bat, 4), "marcel_mae_xfip": round(marcel_mae_pit, 4)}
-    (PRED_DIR / "model_metrics.json").write_text(json.dumps(metrics, indent=2))
+
+def run_training(target: str = "all"):
+    """打者・投手モデルを学習して W&B に記録"""
+    wandb.login(key=os.environ.get("WANDB_API_KEY"))
+
+    metrics = {}
+    if target in ("all", "batter"):
+        metrics.update(_train_batter())
+    if target in ("all", "pitcher"):
+        metrics.update(_train_pitcher())
+
+    # アンサンブル用に MAE をマージ保存（片方だけ実行時は既存値を保持）
+    metrics_path = PRED_DIR / "model_metrics.json"
+    if metrics_path.exists():
+        existing = json.loads(metrics_path.read_text())
+        existing.update(metrics)
+        metrics = existing
+    metrics_path.write_text(json.dumps(metrics, indent=2))
 
 
 def _predict_next_season(model, full_df, latest_df, feat_cols,
@@ -863,4 +898,7 @@ def _predict_next_season(model, full_df, latest_df, feat_cols,
 
 
 if __name__ == "__main__":
-    run_training()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target", choices=["all", "batter", "pitcher"], default="all")
+    args = parser.parse_args()
+    run_training(target=args.target)

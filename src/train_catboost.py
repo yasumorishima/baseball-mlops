@@ -8,6 +8,7 @@ Optuna 200 trials + MedianPruner でハイパーパラメータ最適化（RPi5�
 
 import os
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +33,15 @@ from train import (
 )
 
 CATBOOST_TRIALS = 60   # RPi5 ARM64: 200→60に削減（MedianPruner併用で精度維持）
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 90):
+    """経過時間をログし、budget の 80% 超過で警告"""
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  ⚠️ WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) — timeout risk!")
 _EARLY_STOPPING = 50
 _CATBOOST_ITERATIONS = 600  # 1000→600（early_stopping=50で十分収束）
 _CATBOOST_THREAD_COUNT = 4  # RPi5は4コア
@@ -155,6 +165,8 @@ def save_catboost_to_wandb(model, mae: float, target: str, feature_names: list, 
 
 def run_catboost_training():
     """CatBoost 打者・投手モデルを学習して W&B に記録"""
+    t0 = time.time()
+
     # 打者
     print("=== CatBoost Batter (wOBA) ===")
     bat_df = pd.read_csv(RAW_DIR / "batter_features.csv")
@@ -171,11 +183,13 @@ def run_catboost_training():
     best_params_bat = tune_catboost(X_bat, y_bat, seasons_bat, n_trials=CATBOOST_TRIALS)
     print(f"  best: lr={best_params_bat['learning_rate']:.4f}, "
           f"depth={best_params_bat['depth']}")
+    _log_elapsed("bat Optuna", t0)
 
     model_bat, mae_bat, _, oof_bat = train_catboost(
         X_bat, y_bat, best_params_bat, seasons=seasons_bat
     )
     print(f"  CatBoost MAE wOBA: {mae_bat:.4f}")
+    _log_elapsed("bat train", t0)
 
     # OOF 保存
     oof_mask_bat = ~np.isnan(oof_bat)
@@ -188,6 +202,7 @@ def run_catboost_training():
     save_catboost_to_wandb(model_bat, mae_bat, "woba", feat_cols_bat,
                            {f"cat_{k}": v for k, v in best_params_bat.items()
                             if k in ("learning_rate", "depth", "l2_leaf_reg")})
+    _log_elapsed("bat W&B sync", t0)
 
     # 投手
     print("=== CatBoost Pitcher (xFIP) ===")
@@ -203,11 +218,13 @@ def run_catboost_training():
 
     print(f"  Optuna tuning ({CATBOOST_TRIALS} trials) ...")
     best_params_pit = tune_catboost(X_pit, y_pit, seasons_pit, n_trials=CATBOOST_TRIALS)
+    _log_elapsed("pit Optuna", t0)
 
     model_pit, mae_pit, _, oof_pit = train_catboost(
         X_pit, y_pit, best_params_pit, seasons=seasons_pit
     )
     print(f"  CatBoost MAE xFIP: {mae_pit:.4f}")
+    _log_elapsed("pit train", t0)
 
     # OOF 保存
     oof_mask_pit = ~np.isnan(oof_pit)
@@ -220,6 +237,7 @@ def run_catboost_training():
     save_catboost_to_wandb(model_pit, mae_pit, "xfip", feat_cols_pit,
                            {f"cat_{k}": v for k, v in best_params_pit.items()
                             if k in ("learning_rate", "depth", "l2_leaf_reg")})
+    _log_elapsed("pit W&B sync", t0)
 
     # MAE をメトリクスに追記
     metrics_path = PRED_DIR / "model_metrics.json"
@@ -233,6 +251,7 @@ def run_catboost_training():
     # 予測結果を predictions CSV に追記
     _update_catboost_predictions(model_bat, bat_df, feat_cols_bat, "woba", "batter")
     _update_catboost_predictions(model_pit, pit_df, feat_cols_pit, "xfip", "pitcher")
+    _log_elapsed("predictions update", t0)
 
     print("=== train_catboost.py complete ===")
 

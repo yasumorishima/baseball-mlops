@@ -23,6 +23,7 @@ Output: predictions/*.csv — bayes_woba/xfip, ci_lo80/ci_hi80 columns
 import json
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -150,6 +151,15 @@ def _load_oof(path: Path) -> dict | None:
     df = pd.read_csv(path)
     val_col = [c for c in df.columns if c not in ("player", "season")][0]
     return {(str(r.player), int(r.season)): float(r[val_col]) for _, r in df.iterrows()}
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 60):
+    """経過時間をログし、budget の 80% 超過で警告"""
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  ⚠️ WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) — timeout risk!")
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +821,7 @@ def _update_predictions_fallback(
 # ---------------------------------------------------------------------------
 
 def run():
+    t0 = time.time()
     np.random.seed(42)
 
     wandb.login(key=os.environ.get("WANDB_API_KEY"))
@@ -857,6 +868,7 @@ def run():
           f"lgb_pit={'yes' if lgb_oof_pit else 'no'}, "
           f"cat_bat={'yes' if cat_oof_bat else 'no'}, "
           f"cat_pit={'yes' if cat_oof_pit else 'no'}")
+    _log_elapsed("data_load", t0)
 
     bat_skill_groups = {
         "contact": BAT_CONTACT,
@@ -903,6 +915,7 @@ def run():
     )
     print(f"  Training dataset: {len(dataset_bat)} samples, "
           f"{dataset_bat['player'].nunique()} players")
+    _log_elapsed("bat_dataset_build", t0)
 
     if use_stan:
         try:
@@ -920,9 +933,11 @@ def run():
             # Prepare Stan data
             stan_data_bat, scaler_bat, imputer_bat, player_map_bat = \
                 _prepare_stan_data(dataset_bat, bat_skill_groups, pred_feat_bat, bat_skill_groups)
+            _log_elapsed("bat_stan_data_prep", t0)
 
             # Run MCMC
             fit_bat = _run_stan("hitter_hierarchical.stan", stan_data_bat, cmdstanpy)
+            _log_elapsed("bat_stan_sampling", t0)
 
             # Extract posterior summaries
             param_names = [
@@ -937,6 +952,7 @@ def run():
                 "beta_approach_bq", "beta_batted_ball_bq", "beta_power_bq", "beta_run_value_bq",
             ]
             summary_bat = _extract_posterior_summary(fit_bat, param_names)
+            _log_elapsed("bat_posterior_extract", t0)
 
             # Save coefficients
             coef_data = json.loads(coef_path.read_text()) if coef_path.exists() else {}
@@ -968,6 +984,7 @@ def run():
                     pred_feat_bat, player_map_bat, scaler_bat, imputer_bat,
                     bat_skill_groups, stan_data_bat,
                 )
+            _log_elapsed("bat_predictions_update", t0)
 
             log_dict.update({
                 "model_type_bat": "stan_hierarchical",
@@ -991,12 +1008,16 @@ def run():
                 log_dict, coef_path,
             )
             bayes_mae_bat = log_dict.get("bayes_batter_delta_MAE")
+            _log_elapsed("bat_fallback", t0)
     else:
         _run_batter_fallback(
             dataset_bat, bat_df, bat_skill_groups, pf_lookup,
             log_dict, coef_path,
         )
         bayes_mae_bat = log_dict.get("bayes_batter_delta_MAE")
+        _log_elapsed("bat_fallback", t0)
+
+    _log_elapsed("batter_complete", t0)
 
     # ===== PITCHER xFIP =====
     print("=== Pitcher Hierarchical Bayes (xFIP) ===")
@@ -1008,6 +1029,7 @@ def run():
     )
     print(f"  Training dataset: {len(dataset_pit)} samples, "
           f"{dataset_pit['player'].nunique()} players")
+    _log_elapsed("pit_dataset_build", t0)
 
     if use_stan:
         try:
@@ -1023,8 +1045,10 @@ def run():
 
             stan_data_pit, scaler_pit, imputer_pit, player_map_pit = \
                 _prepare_stan_data(dataset_pit, pit_skill_groups, pred_feat_pit, pit_skill_groups)
+            _log_elapsed("pit_stan_data_prep", t0)
 
             fit_pit = _run_stan("pitcher_hierarchical.stan", stan_data_pit, cmdstanpy)
+            _log_elapsed("pit_stan_sampling", t0)
 
             param_names_pit = [
                 "sigma_alpha",
@@ -1040,6 +1064,7 @@ def run():
                 "beta_velo_bq", "beta_command_bq", "beta_contact_bq", "beta_fatigue_bq",
             ]
             summary_pit = _extract_posterior_summary(fit_pit, param_names_pit)
+            _log_elapsed("pit_posterior_extract", t0)
 
             coef_data = json.loads(coef_path.read_text()) if coef_path.exists() else {}
             coef_data["pitcher_hierarchical"] = summary_pit
@@ -1055,6 +1080,7 @@ def run():
                     pred_feat_pit, player_map_pit, scaler_pit, imputer_pit,
                     pit_skill_groups, stan_data_pit,
                 )
+            _log_elapsed("pit_predictions_update", t0)
 
             log_dict.update({
                 "model_type_pit": "stan_hierarchical",
@@ -1074,16 +1100,21 @@ def run():
                 log_dict, coef_path,
             )
             bayes_mae_pit = log_dict.get("bayes_pitcher_delta_MAE")
+            _log_elapsed("pit_fallback", t0)
     else:
         _run_pitcher_fallback(
             dataset_pit, pit_df, pit_skill_groups, pf_lookup,
             log_dict, coef_path,
         )
         bayes_mae_pit = log_dict.get("bayes_pitcher_delta_MAE")
+        _log_elapsed("pit_fallback", t0)
+
+    _log_elapsed("pitcher_complete", t0)
 
     # ===== W&B log =====
     wandb.log(log_dict)
     run_wb.finish()
+    _log_elapsed("wandb_sync", t0)
 
     # ===== Update model_metrics.json for ensemble =====
     metrics_path = PRED_DIR / "model_metrics.json"
@@ -1094,6 +1125,7 @@ def run():
         metrics["bayes_mae_xfip"] = round(bayes_mae_pit, 4)
     metrics_path.write_text(json.dumps(metrics, indent=2))
 
+    _log_elapsed("total", t0)
     print("=== train_bayes.py complete ===")
 
 

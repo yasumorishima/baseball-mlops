@@ -13,6 +13,7 @@ Simplified: we predict components and use a regression to reconstruct xFIP.
 
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,15 @@ PITCHER_COMPONENTS = ["K%", "BB%", "HR/9"]
 COMPONENT_OPTUNA_TRIALS = 40  # Per component (7 models × 40 = 280 total, ARM64 optimized)
 _EARLY_STOPPING = 50
 RECENCY_DECAY = 0.85
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 60):
+    """経過時間をログし、budget の 80% 超過で警告"""
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  ⚠️ WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) — timeout risk!")
 
 
 def _recency_weights(seasons: np.ndarray) -> np.ndarray:
@@ -140,6 +150,7 @@ def _reconstruct_xfip(k_pct, bb_pct, hr9, ip_rate=1.0):
 
 def run_component_prediction():
     """Train component models and generate reconstructed predictions"""
+    t0 = time.time()
     print("=" * 60)
     print("COMPONENT-LEVEL PREDICTION (PECOTA approach)")
     print("=" * 60)
@@ -193,6 +204,7 @@ def run_component_prediction():
         component_mae_bat[comp] = mae
         component_oof_bat[comp] = (train_comp["player"].values, train_comp["season"].values, oof)
         print(f"  {comp}: MAE = {mae:.4f}")
+        _log_elapsed(f"bat_{comp}", t0)
 
     # Reconstruct wOBA from component OOF predictions
     if all(c in component_oof_bat for c in BATTER_COMPONENTS):
@@ -248,6 +260,8 @@ def run_component_prediction():
             safe_name = comp.replace("%", "pct").replace("/", "_")
             joblib.dump(model, MODELS_DIR / f"component_{safe_name}_batter.pkl")
 
+    _log_elapsed("batter_components_total", t0)
+
     # ===== PITCHER COMPONENTS =====
     print("\n=== Pitcher Components ===")
     pit_df = pd.read_csv(RAW_DIR / "pitcher_features.csv")
@@ -292,6 +306,7 @@ def run_component_prediction():
         component_mae_pit[comp] = mae
         component_oof_pit[comp] = (train_comp["player"].values, train_comp["season"].values, oof)
         print(f"  {comp}: MAE = {mae:.4f}")
+        _log_elapsed(f"pit_{comp}", t0)
 
     # Reconstruct xFIP
     if all(c in component_oof_pit for c in PITCHER_COMPONENTS):
@@ -338,6 +353,8 @@ def run_component_prediction():
             safe_name = comp.replace("%", "pct").replace("/", "_")
             joblib.dump(model, MODELS_DIR / f"component_{safe_name}_pitcher.pkl")
 
+    _log_elapsed("pitcher_components_total", t0)
+
     # ===== W&B Logging =====
     run_wb = wandb.init(project="baseball-mlops", entity=entity, job_type="component_prediction",
                         config={"batter_components": BATTER_COMPONENTS,
@@ -352,6 +369,7 @@ def run_component_prediction():
         log_dict[f"component_pit_{safe}_MAE"] = round(mae, 4)
     wandb.log(log_dict)
     run_wb.finish()
+    _log_elapsed("wandb_sync", t0)
 
     # Save component MAEs to model_metrics.json
     metrics_path = PRED_DIR / "model_metrics.json"
@@ -366,6 +384,7 @@ def run_component_prediction():
     _generate_component_predictions(bat_df, pit_df, component_models_bat,
                                      component_models_pit, feat_cols_bat, feat_cols_pit)
 
+    _log_elapsed("total", t0)
     print("\n=== train_components.py complete ===")
 
 

@@ -72,10 +72,19 @@ jobs:
           "
         continue-on-error: true
 
-      - name: Train LightGBM (Optuna 1000 trials + recency weight)
-        timeout-minutes: 180
-        run: python src/train.py
+      - name: Train LightGBM Batter (Optuna 1000 trials)
+        timeout-minutes: 150
+        run: python src/train.py --target batter
         env:
+          PYTHONUNBUFFERED: "1"
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+
+      - name: Train LightGBM Pitcher (Optuna 1000 trials)
+        timeout-minutes: 150
+        run: python src/train.py --target pitcher
+        env:
+          PYTHONUNBUFFERED: "1"
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
@@ -83,6 +92,7 @@ jobs:
         timeout-minutes: 90
         run: python src/train_catboost.py
         env:
+          PYTHONUNBUFFERED: "1"
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
@@ -90,6 +100,7 @@ jobs:
         timeout-minutes: 60
         run: python src/train_components.py
         env:
+          PYTHONUNBUFFERED: "1"
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
 
@@ -97,6 +108,7 @@ jobs:
         timeout-minutes: 60
         run: python src/train_bayes.py
         env:
+          PYTHONUNBUFFERED: "1"
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
           WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
           CMDSTAN: ${{ env.CMDSTAN }}

@@ -418,6 +418,107 @@ def check_existing_csvs():
             print(f"  {f}: NOT FOUND (will be created during fetch)")
 
 
+def check_previous_run_timing():
+    """前回のワークフロー実行でtimeout超過リスクがなかったか確認。
+
+    GITHUB_TOKEN が使える CI 環境でのみ実行。
+    各ステップの実行時間を取得し、timeout-minutes の 70% 超なら警告。
+    """
+    print("\n" + "=" * 60)
+    print("7. Previous Run Step Timing")
+    print("=" * 60)
+
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        print("  SKIP: not in CI (GITHUB_TOKEN/GITHUB_REPOSITORY not set)")
+        return
+
+    import json
+    import urllib.request
+    import urllib.error
+    from datetime import datetime
+
+    # timeout-minutes defined in workflow (step name → minutes)
+    step_budgets = {
+        "Train LightGBM Batter": 150,
+        "Train LightGBM Pitcher": 150,
+        "Train CatBoost": 90,
+        "Train Component models": 60,
+        "Train Bayes model": 60,
+        "Ensemble": None,
+        "Fetch Statcast": None,
+    }
+
+    api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5&status=completed"
+    req = urllib.request.Request(api_url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            runs = json.loads(resp.read())["workflow_runs"]
+    except Exception as e:
+        print(f"  SKIP: API error: {e}")
+        return
+
+    # Find last completed Weekly Retrain run
+    retrain_run = None
+    for r in runs:
+        if r["name"] == "Weekly Retrain" and r["conclusion"] in ("success", "failure"):
+            retrain_run = r
+            break
+    if not retrain_run:
+        print("  SKIP: no recent Weekly Retrain run found")
+        return
+
+    # Get jobs for that run
+    jobs_url = retrain_run["jobs_url"]
+    req2 = urllib.request.Request(jobs_url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    })
+    try:
+        with urllib.request.urlopen(req2, timeout=15) as resp:
+            jobs = json.loads(resp.read())["jobs"]
+    except Exception as e:
+        print(f"  SKIP: jobs API error: {e}")
+        return
+
+    print(f"  Last run: #{retrain_run['run_number']} ({retrain_run['conclusion']})")
+    for job in jobs:
+        for step in job.get("steps", []):
+            if not step.get("started_at") or not step.get("completed_at"):
+                continue
+            started = datetime.fromisoformat(step["started_at"].replace("Z", "+00:00"))
+            completed = datetime.fromisoformat(step["completed_at"].replace("Z", "+00:00"))
+            elapsed_min = (completed - started).total_seconds() / 60
+
+            # Find matching budget
+            budget = None
+            for key, val in step_budgets.items():
+                if key in step["name"]:
+                    budget = val
+                    break
+
+            if budget is not None:
+                pct = elapsed_min / budget * 100
+                status = "OK"
+                if pct > 80:
+                    status = "⚠️ RISK"
+                    warnings.append(
+                        f"Step '{step['name']}' used {elapsed_min:.0f}/{budget} min "
+                        f"({pct:.0f}%) in run #{retrain_run['run_number']}. "
+                        f"Consider increasing timeout or splitting step."
+                    )
+                elif pct > 70:
+                    status = "WATCH"
+                print(f"  {step['name'][:50]:<50} {elapsed_min:>6.1f}/{budget:>3} min "
+                      f"({pct:>4.0f}%) [{status}]")
+            elif elapsed_min > 1:
+                print(f"  {step['name'][:50]:<50} {elapsed_min:>6.1f} min")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Preflight checks")
@@ -439,6 +540,7 @@ def main():
         check_pybaseball_api()
 
     check_existing_csvs()
+    check_previous_run_timing()
 
     # Summary
     print("\n" + "=" * 60)
