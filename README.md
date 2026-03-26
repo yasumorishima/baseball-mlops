@@ -2,7 +2,7 @@
 
 **MLB Statcast × GCP × MLOps — Player performance prediction pipeline**
 
-> **v11 開発中 (2026-03-26):** BigQuery pitch-level Statcast データ（6.8M 行 × 122 列）を選手×シーズンに集計し、打者 8 / 投手 9 スキルグループの階層 Bayes モデルに統合。**データ基盤統合完了** — 全 BQ 参照を [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) の `mlb_shared` データセットに切替済み。Weekly auto-retrain は計算環境の見直し後に再開予定。ダッシュボード・API は稼働中です。
+> **v11 学習実行中 (2026-03-26):** BQ pitch-level Statcast（6.8M 行 × 122 列）+ 打者 8 / 投手 9 スキルグループの階層 Bayes。**データ基盤統合完了**（全 BQ 参照 → [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) `mlb_shared`）。**Preflight check 導入** — 学習前に BQ 接続・年カバレッジ・カラム存在・集計クエリ・pybaseball API を自動検証し、問題があれば詳細デバッグ出力で即停止。hosted runner で Weekly Retrain 再開。ダッシュボード・API 稼働中。
 
 MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
 Marcel 法を上回る選手成績予測モデルを **GCP 分析基盤 (BigQuery + BigQuery ML + Cloud Run)** 上で MLOps パイプラインとして継続運用する。
@@ -84,7 +84,8 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
 | データ基盤 | BigQuery — 生データ13テーブル + 予測結果 + メトリクス履歴 |
 | 球場補正 | savant-extras で FanGraphs から動的取得（pf_5yr） |
-| 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00）— **一時停止中** |
+| 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00）— hosted runner で再開 |
+| **Preflight** | **学習前に BQ 接続・テーブル行数・カラム存在・集計クエリ・API を自動検証** |
 | モデル管理 | W&B Model Registry（production タグ自動昇格） |
 | API (本番) | Cloud Run — FastAPI サーバーレスコンテナ（Artifact Registry 経由） |
 | API (開発) | RPi5 Docker（port 8002）— W&B から 6 時間ごとに最新モデルを自動ロード |
@@ -100,7 +101,9 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 > **開発経緯の注記**: 通常の実務フローでは BQML（SQL）でプロトタイプ → Python で本番化という順序ですが、本プロジェクトは GCP 未使用の状態で開発を始めたため Python 本番モデル（LightGBM/CatBoost 等 5モデルアンサンブル）が先に充実しました。現在は逆方向に、BQML の精度を Python 版に揃えていく段階です。
 
 ```
-[GitHub Actions — 毎週月曜 JST 11:00]
+[GitHub Actions — 毎週月曜 JST 11:00 (hosted runner)]
+  ↓ preflight.py           BQ接続・年カバレッジ・カラム存在・集計クエリ・pybaseball API
+                           → 問題あれば即停止 + 詳細デバッグ出力（fuzzy match・SQL・null率等）
   ↓ fetch_statcast.py      pybaseball / savant-extras →
                            FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
   ↓ fetch_bq_features.py   BigQuery mlb_shared.statcast_pitches (6.8M rows) →
@@ -144,7 +147,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | TrackMan / Hawk-Eye | pybaseball Statcast（同一トラッキングデータ） | データソース |
 | S3 (raw data lake) | BigQuery `mlb_shared` 生データ 13 テーブル | データレイク |
 | Airflow DAG | GitHub Actions `weekly_retrain.yml` | オーケストレーション |
-| SageMaker Processing Job | RPi5 self-hosted runner（Python 学習） | バッチ学習 |
+| SageMaker Processing Job | GitHub hosted runner（Python 学習） | バッチ学習 |
 | SageMaker Batch Transform | BigQuery ML `CREATE MODEL`（SQL ML） | SQL モデル学習 |
 | SageMaker Endpoint | Cloud Run FastAPI コンテナ | 推論 API |
 | ダッシュボード | Streamlit Cloud + BigQuery Studio | 可視化 |
