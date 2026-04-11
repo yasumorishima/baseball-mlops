@@ -1,8 +1,9 @@
 name: Weekly Retrain
 
 on:
-  schedule:
-    - cron: "0 2 * * 1"   # 毎週月曜 UTC 02:00 (JST 11:00)
+  # Temporarily disabled — data pipeline still stabilising. Re-enable by uncommenting.
+  # schedule:
+  #   - cron: "0 2 * * 1"   # 毎週月曜 UTC 02:00 (JST 11:00)
   workflow_dispatch:
     inputs:
       memo:

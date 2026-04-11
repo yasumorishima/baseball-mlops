@@ -1,8 +1,9 @@
 name: Spring Training Update (Dev)
 
 on:
-  schedule:
-    - cron: "0 14 * * *"   # 毎日 UTC 14:00 (JST 23:00)
+  # Temporarily disabled — data pipeline still stabilising. Re-enable by uncommenting.
+  # schedule:
+  #   - cron: "0 14 * * *"   # 毎日 UTC 14:00 (JST 23:00)
   workflow_dispatch:
 
 jobs:
