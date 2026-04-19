@@ -1,9 +1,17 @@
 # baseball-mlops
 
-**MLB Statcast × MLOps — Weekly auto-retrained player performance prediction**
+**MLB Statcast × MLOps — Player performance prediction**
 
 MLB Statcast のトラッキングデータ（打球速度・バレル率・xwOBA 等）を使い、
-Marcel 法を上回る選手成績予測モデルを MLOps パイプラインで継続運用する。
+Marcel 法を上回る選手成績予測モデルを運用する。
+
+> **📢 2026-04-19 インフラ移行**
+> BigQuery `mlb_shared` / BQML モデル群 / Cloud Run / 週次自動再学習ワークフローは全て退役しました。
+> - データ基盤: BigQuery → **RPi5 Parquet (`/mnt/ssd/mlb_shared/`)**
+> - 訓練パイプライン: 一旦撤去（BQML 6 SQL・`weekly_retrain.yml`・`gcp_deploy.yml`・`bqml_train.py`・`load_to_bq.py` を削除）
+> - 本番 API: Cloud Run 未使用（Dockerfile と docker-compose.yml は将来の RPi5 Docker デプロイ用に保持）
+> - **Streamlit ダッシュボードと W&B Model Registry 連携の推論ランタイムは従来通り稼働**
+> - 訓練パイプラインは RPi5 Parquet 前提で別セッションにて再設計予定
 
 | 環境 | URL |
 |---|---|
@@ -68,72 +76,53 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 |---|---|
 | 予測ターゲット | 打者: 翌年 wOBA / 投手: 翌年 xFIP |
 | モデル (Python) | LightGBM + CatBoost + ElasticNet Bayes + Component (PECOTA方式) |
-| モデル (BQML) | Boosted Tree Regressor + 線形回帰（SQL だけで ML） |
+| ~~モデル (BQML)~~ | ~~Boosted Tree Regressor + 線形回帰~~ — **2026-04-19 退役** |
 | 最適化 | Optuna（LGB 1000 / CatBoost 500 / Component 各200 trials） |
 | ベースライン | MLB Marcel 法（加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
-| データ基盤 | BigQuery — 生データ13テーブル + 予測結果 + メトリクス履歴 |
+| データ基盤 | **RPi5 Parquet**（`/mnt/ssd/mlb_shared/`、[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理） |
 | 球場補正 | savant-extras で FanGraphs から動的取得（pf_5yr） |
-| 自動再学習 | GitHub Actions cron（毎週月曜 JST 11:00） |
+| ~~自動再学習~~ | ~~GitHub Actions cron（毎週月曜 JST 11:00）~~ — **2026-04-19 撤去、再設計待ち** |
 | モデル管理 | W&B Model Registry（production タグ自動昇格） |
-| API (本番) | Cloud Run — FastAPI サーバーレスコンテナ（Artifact Registry 経由） |
-| API (開発) | RPi5 Docker（port 8002）— W&B から 6 時間ごとに最新モデルを自動ロード |
+| ~~API (本番)~~ | ~~Cloud Run — FastAPI サーバーレスコンテナ~~ — **未使用** |
+| API 構成 | Dockerfile + docker-compose.yml は RPi5 Docker 用に残存（将来の port 8003+ デプロイ想定、8002 は hormuz 衝突） |
 | ダッシュボード | Streamlit — Marcel / ML / Bayes 3列比較・Spring Training 検証 |
-| 通知 | Discord Webhook（Python + BQML 全モデルMAE詳細を自動通知） |
+| 通知 | Discord Webhook |
 
 ---
 
 ## アーキテクチャ
 
-### GCP 分析基盤（v9）
+### 現状（2026-04-19 以降）
 
 ```
-[GitHub Actions — 毎週月曜 JST 11:00]
-  ↓ fetch_statcast.py      pybaseball / savant-extras →
-                           FanGraphs + Statcast + Bat Tracking + Arsenal + park_factors
-  ↓ train.py               LightGBM — Optuna 1000 trials + Recency Decay 0.85/年
-  ↓ train_catboost.py      CatBoost — Optuna 500 trials + 異なる分割戦略
-  ↓ train_components.py    PECOTA方式 — K%/BB%/BABIP/ISO(HR/9) 個別予測 → Ridge再構成
-  ↓ train_bayes.py         ElasticNet — Marcel残差学習 + LGB/Cat OOFスタッキング + MC CI
-  ↓ ensemble.py            5モデル逆MAE重み付き平均（利用可能モデルで動的構築）
-  ↓ W&B Artifact 保存      MAE / 特徴量重要度 / Optuna best_params / モデルファイル
-  ↓ load_to_bq.py          BigQuery に生データ13テーブル + 予測結果をロード
-  ↓ bqml_train.py          BigQuery ML — Boosted Tree + 線形回帰（SQLだけでML）
-  ↓ predictions/ コミット   Streamlit Cloud が直接読み込む
-  ↓ Discord 通知           Python + BQML 全モデルMAE詳細つき通知
+[RPi5 Parquet — /mnt/ssd/mlb_shared/ (927MB, 16 tables)]
+  ↑ mlb-data-pipeline が定期的に fetch
+  (pybaseball / savant-extras → Parquet 直書き)
 
-[Cloud Run — baseball-mlops-api（本番 API）]
-  FastAPI コンテナをサーバーレスデプロイ
-  Artifact Registry 経由で Docker イメージを管理
-  retrain 完了後に自動デプロイ (master のみ)
-
-[RPi5 — FastAPI / Docker port 8002（開発 API）]
-  起動時 + 6 時間ごとに W&B production モデルを自動ロード
-  POST /model/reload で即時反映も可能
-
-[BigQuery — data-platform-490901.mlb_statcast]
-  生 Statcast データ 13テーブル + 予測結果 + BQML モデル + メトリクス履歴
-  分析用ビュー 7本（打球品質リーダーボード、投手球種戦略分析 等）
+[既存学習済みモデル (models/*.pkl, W&B Model Registry)]
+  ↑ Weekly Retrain 退役前の最終モデルを保持
+  Streamlit Cloud / API が参照
 
 [Streamlit — 本番 / 開発 2 環境]
   本番 (master)  打者 wOBA / 投手 xFIP 予測ランキング + Marcel vs ML 散布図
   開発 (develop) 上記 + Spring Training 2026 実績 vs 予測 リアルタイム検証
 ```
 
-### AWS/GCP 対応表
+### 過去の構成（2026-04-19 まで、参考）
 
-本プロジェクトは、プロ野球球団が運用する AWS SageMaker + Airflow パイプラインと同等のアーキテクチャを GCP 上に構築している。
+従来は GitHub Actions 週次 cron で Statcast fetch → LightGBM/CatBoost/ElasticNet/Component/Ensemble 学習 → BQML 学習 → Cloud Run デプロイを回していた。BQ `mlb_shared` 退役と長期的な CI 不稼働（3 ヶ月間 Weekly Retrain 全 failure/cancelled）を受けて、訓練パイプラインは一旦撤去。
 
-| 球団 AWS 基盤 | 本プロジェクト GCP 基盤 | 対応関係 |
-|---|---|---|
-| TrackMan / Hawk-Eye | pybaseball Statcast（同一トラッキングデータ） | データソース |
-| S3 (raw data lake) | BigQuery `mlb_statcast` 生データ 13 テーブル | データレイク |
-| Airflow DAG | GitHub Actions `weekly_retrain.yml` | オーケストレーション |
-| SageMaker Processing Job | RPi5 self-hosted runner（Python 学習） | バッチ学習 |
-| SageMaker Batch Transform | BigQuery ML `CREATE MODEL`（SQL ML） | SQL モデル学習 |
-| SageMaker Endpoint | Cloud Run FastAPI コンテナ | 推論 API |
-| ダッシュボード | Streamlit Cloud + BigQuery Studio | 可視化 |
+現存する訓練コード: `src/train.py` / `src/train_catboost.py` / `src/train_components.py` / `src/train_bayes.py` / `src/ensemble.py` / `src/backtest.py` / `src/fetch_statcast.py` / `src/fetch_spring_training.py`（全て CSV ベース、BQ 非依存）。
+
+削除: `src/bqml_train.py` / `src/load_to_bq.py` / `sql/*.sql` 5 本 / `.github/workflows/{weekly_retrain,gcp_deploy}.yml`。
+
+### 将来の再設計方針
+
+- データ転送: RPi5 Parquet → GH Actions ubuntu-latest へ Tailscale + rsync で取得（予定）
+- 訓練環境: ubuntu-latest（RPi5 ARM は Optuna 1000 trials には力不足）
+- API: 必要になれば Dockerfile を RPi5 Docker で起動（port 8003 以降）
 
 ---
 
@@ -199,60 +188,43 @@ develop ─→  baseball-mlops-dev.streamlit.app  （開発・検証）
 |---|---|
 | `WANDB_API_KEY` | W&B API キー |
 | `WANDB_ENTITY` | W&B チーム名 |
-| `API_RELOAD_URL` | FastAPI 公開 URL（RPi5、任意） |
-| `GCP_SA_KEY` | GCP サービスアカウント JSON 鍵（BigQuery + Cloud Run） |
 | `DISCORD_WEBHOOK_URL` | Discord 通知 Webhook URL |
+
+> ~~`GCP_SA_KEY`~~ / ~~`API_RELOAD_URL`~~ は 2026-04-19 に不要化（BQ + Cloud Run 退役、RPi5 API 未稼働）。
 
 ---
 
-## BigQuery Data Platform
+## データ基盤（RPi5 Parquet）
 
-All Statcast raw data, predictions, and BQML models are stored in BigQuery (free tier).
+全 Statcast / FanGraphs 共有データは RPi5 `/mnt/ssd/mlb_shared/` に Parquet で保管（[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理、合計 927MB）。
 
-| Item | Value |
-|---|---|
-| Project | `data-platform-490901` |
-| Dataset | `mlb_statcast` |
+2026-04-19 まで BigQuery `data-platform-490901.mlb_shared` がミラーとして存在したが、依存先の CI が長期不稼働・BQML 訓練も停止していたため退役。
 
-### Raw Data Tables (weekly auto-refresh)
+### 主要テーブル（Parquet）
 
 | テーブル | ソース | 内容 |
 |---|---|---|
-| `raw_fg_batting` | FanGraphs | 打者成績 (wOBA/xwOBA/K%/BB% 等) |
-| `raw_fg_pitching` | FanGraphs | 投手成績 (xFIP/FIP/ERA 等) |
-| `raw_sc_batter_exitvelo` | Statcast | 打球速度・バレル率 |
-| `raw_sc_batter_expected` | Statcast | 打者期待値 (xBA/xSLG/xwOBA) |
-| `raw_sc_sprint_speed` | Statcast | スプリント速度 |
-| `raw_sc_batted_ball` | Statcast | 打球方向 (pull/oppo %) |
-| `raw_sc_bat_tracking` | Hawk-Eye | バット追跡 (bat speed/swing length 等) |
-| `raw_sc_pitcher_exitvelo` | Statcast | 被打球速度 |
-| `raw_sc_pitcher_expected` | Statcast | 投手期待値 |
-| `raw_sc_pitcher_arsenal` | Statcast | 球種別統計 |
-| `raw_park_factors` | FanGraphs | 球場補正係数 |
-| `raw_batter_features` | 統合 | 打者全特徴量 (~95列) |
-| `raw_pitcher_features` | 統合 | 投手全特徴量 (~105列) |
+| `fg_batting` | FanGraphs | 打者成績 (wOBA/xwOBA/K%/BB% 等) |
+| `fg_pitching` | FanGraphs | 投手成績 (xFIP/FIP/ERA 等) |
+| `fg_pitcher_plus` | FanGraphs | Stuff+/Location+/Pitching+ |
+| `sc_batter_exitvelo` | Statcast | 打球速度・バレル率 |
+| `sc_batter_expected` | Statcast | 打者期待値 (xBA/xSLG/xwOBA) |
+| `sprint_speed` | Statcast | スプリント速度 |
+| `sc_batted_ball` | Statcast | 打球方向 (pull/oppo %) |
+| `sc_bat_tracking` | Hawk-Eye | バット追跡 (bat speed/swing length 等) |
+| `sc_pitcher_exitvelo` | Statcast | 被打球速度 |
+| `sc_pitcher_expected` | Statcast | 投手期待値 |
+| `sc_pitcher_arsenal` | Statcast | 球種別統計 |
+| `park_factors` | FanGraphs | 球場補正係数 |
+| `oaa` / `oaa_team` / `catcher` | Statcast | 守備指標 |
+| `statcast_pitches` | Statcast | 全投球データ（2015-2025、~7.7M 行） |
 
-### Prediction & Model Tables
+### 退役済み（2026-04-19）
 
-| テーブル | 内容 |
-|---|---|
-| `batter_predictions` / `pitcher_predictions` | Python 5-model ensemble 予測 |
-| `bqml_predictions_batter` / `bqml_predictions_pitcher` | BQML Boosted Tree + 線形回帰 予測 |
-| `model_metrics_history` | 全モデル MAE 時系列記録 |
-| `backtest_outliers_*` / `backtest_yearly_mae_*` | バックテスト結果 |
-
-### BQML Models
-
-| モデル | タイプ | ターゲット |
-|---|---|---|
-| `bqml_batter_woba` | Boosted Tree Regressor | 翌年 wOBA |
-| `bqml_pitcher_xfip` | Boosted Tree Regressor | 翌年 xFIP |
-| `bqml_batter_woba_linear` | Linear Regression | 翌年 wOBA |
-| `bqml_pitcher_xfip_linear` | Linear Regression | 翌年 xFIP |
-
-### Analysis Views
-
-`v_batter_trend` / `v_pitcher_trend` / `v_batted_ball_leaders` / `v_pitcher_arsenal` / `v_park_effects` / `v_model_comparison` / `v_data_coverage`
+- **BigQuery dataset `data-platform-490901.mlb_shared`** — `bq rm -r -f -d` 実行済
+- **BQML models**: `bqml_batter_woba` / `bqml_pitcher_xfip` / `_linear` 4 本 — SQL ファイル削除、再設計で Python ML に移行予定
+- **Analysis views**: `v_batter_trend` / `v_pitcher_trend` / `v_batted_ball_leaders` / `v_pitcher_arsenal` / `v_park_effects` / `v_model_comparison` / `v_data_coverage` — 退役
+- **raw_* 13 テーブル**: baseball-mlops 側で `fetch_statcast.py` から再生成可能（BQ への書き出しは不要化）
 
 ---
 
@@ -304,4 +276,4 @@ NPB Hawk-Eye データ公開後、`fetch_statcast.py` のデータソースを�
 
 ---
 
-*Built with Claude Code / LightGBM + CatBoost + Optuna + W&B + BigQuery + BigQuery ML + Cloud Run + FastAPI + Streamlit + GitHub Actions*
+*Built with Claude Code / LightGBM + CatBoost + Optuna + W&B + FastAPI + Streamlit + GitHub Actions*
