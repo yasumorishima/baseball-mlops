@@ -7,7 +7,7 @@ Marcel 法を上回る選手成績予測モデルを運用する。
 
 > **📢 2026-04-19 インフラ移行**
 > BigQuery `mlb_shared` / BQML モデル群 / Cloud Run / 週次自動再学習ワークフローは全て退役しました。
-> - データ基盤: BigQuery → **RPi5 Parquet (`/mnt/ssd/mlb_shared/`)**
+> - データ基盤: BigQuery → RPi5 Parquet → **[Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats)**（RPi5 の保存先は 2026-10-08 時点で存在しない）
 > - 訓練パイプライン: 一旦撤去（BQML 6 SQL・`weekly_retrain.yml`・`gcp_deploy.yml`・`bqml_train.py`・`load_to_bq.py` を削除）
 > - 本番 API: Cloud Run 未使用（Dockerfile と docker-compose.yml は将来の RPi5 Docker デプロイ用に保持）
 > - **Streamlit ダッシュボードと W&B Model Registry 連携の推論ランタイムは従来通り稼働**
@@ -81,7 +81,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 | ベースライン | MLB Marcel 法（加重平均 + 平均回帰 + 年齢調整） |
 | アンサンブル | 最大5モデルの逆MAE重み付き平均（動的構築） |
 | データ | MLB Statcast + Bat Tracking + Arsenal via pybaseball / savant-extras |
-| データ基盤 | **RPi5 Parquet**（`/mnt/ssd/mlb_shared/`、[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理） |
+| データ基盤 | **[Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats)**（[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週更新） |
 | 球場補正 | savant-extras で FanGraphs から動的取得（pf_5yr） |
 | ~~自動再学習~~ | ~~GitHub Actions cron（毎週月曜 JST 11:00）~~ — **2026-04-19 撤去、再設計待ち** |
 | モデル管理 | W&B Model Registry（production タグ自動昇格） |
@@ -97,7 +97,7 @@ CV results (0.0281 / 0.521) and holdout results (0.0291 / 0.484) are consistent 
 ### 現状（2026-04-19 以降）
 
 ```
-[RPi5 Parquet — /mnt/ssd/mlb_shared/ (927MB, 16 tables)]
+[Hugging Face yasumorishima/mlb-stats (weekly, mlb-data-pipeline)]
   ↑ mlb-data-pipeline が定期的に fetch
   (pybaseball / savant-extras → Parquet 直書き)
 
@@ -196,7 +196,7 @@ develop ─→  baseball-mlops-dev.streamlit.app  （開発・検証）
 
 ## データ基盤（RPi5 Parquet）
 
-全 Statcast / FanGraphs 共有データは RPi5 `/mnt/ssd/mlb_shared/` に Parquet で保管（[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理、合計 927MB）。
+全 Statcast / FanGraphs 共有データは [Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats) にある（[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が GitHub Actions で毎週更新。`statcast_pitches` は Hugging Face に無い）。
 
 2026-04-19 まで BigQuery `data-platform-490901.mlb_shared` がミラーとして存在したが、依存先の CI が長期不稼働・BQML 訓練も停止していたため退役。
 
